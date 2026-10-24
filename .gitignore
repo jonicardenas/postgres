@@ -2,6 +2,7 @@
 # estudiante, no material del curso — no se versionan.
 postgres/data/*
 !postgres/data/.gitkeep
+data/pgdata/*
 
 # (La configuración/sesión de pgAdmin vive en un volumen nombrado de Docker,
 # no en una carpeta de esta carpeta — ver docker-compose.yml.)
