@@ -1,0 +1,9 @@
+isbn,titulo,autor,categoria,anio_publicacion,ejemplares_disponibles
+9789580400011,El amor en los tiempos del cólera,Gabriel García Márquez,Novela,1985,5
+9789580400028,Ficciones,Jorge Luis Borges,Cuento,1944,3
+9789580400035,Pedro Páramo,Juan Rulfo,Novela,1955,4
+9789580400042,La ciudad y los perros,Mario Vargas Llosa,Novela,1963,2
+9789580400059,Rayuela,Julio Cortázar,Novela,1963,6
+9789580400011,El amor en los tiempos del cólera (Duplicado en CSV),Gabriel García Márquez,Novela,1985,2
+9789580400066,Libro del Futuro,Autor Viajero,Ciencia Ficción,2150,1
+9789580400073,Libro con Ejemplares Excesivos,Autor Desconocido,Ensayo,2020,10000000
