@@ -71,3 +71,25 @@ crypt(documento, gen_salt('bf')) → usuario."contrasena"
 
 Por tanto, el CSV no contiene una columna de contraseña y nunca se guarda el
 documento como contraseña en texto plano.
+
+
+Archivos Propios (`lectores_propio.csv` y `libros_propio.csv`): Diseñados de manera personalizada para someter los scripts de PostgreSQL a casos límite y verificar la correcta captura de excepciones.
+### Pruebas de Carga con Archivos Propios (Validación Integral de la Línea de Defensa)
+
+* **Comandos Ejecutados:**
+  Carga de Libros: `docker compose exec postgres psql -U curso -d curso -v archivo=/scripts/datos/libros_propio.csv -f /scripts/datos/S14-carga-libros.sql.txt`
+  Carga de Lectores: `docker compose exec postgres psql -U curso -d curso -v archivo=/scripts/datos/lectores_propio.csv -f /scripts/datos/S14-carga-lectores.sql.txt`
+
+  1. **Evaluación en Libros (`libros_propio.csv`):**
+     Resultado de Carga: 0 filas cargadas | 1 fila rechazada.
+     Causa del Rechazo: El sistema identificó en la `línea 2` la inconsistencia `"isbn no tiene 13 dígitos"`, interceptando el registro con contenido `978-9871234567,Libro Ejemplo 1...`.
+     Comportamiento: La validación lógica impidió la inserción de un formato de ISBN erróneo en la tabla `Libro`, manteniendo la integridad del estándar de datos.
+
+  2. **Evaluación en Lectores (`lectores_propio.csv`):**
+     Resultado de Carga: 0 filas cargadas | 1 fila rechazada.
+     Causa del Rechazo: El sistema detectó en la `línea 2` la infracción `"documento ya existe"`, capturando el intento de inserción del registro duplicado `123456789,Juan,Perez...`.
+     Comportamiento: Se activó la restricción de unicidad para la cédula/documento del lector, desviando el registro conflictivo a la tabla de auditoría de rechazos.
+
+Podemos confirmar que la línea de defensa es plenamente funcional tanto para archivos de prueba estándar como para datasets personalizados. Garantiza que la base de datos PostgreSQL en Docker absorba únicamente registros válidos y reporte formalmente las anomalías en la consola.
+
+
