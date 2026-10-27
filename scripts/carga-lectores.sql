@@ -53,44 +53,46 @@ FROM stg_lectores_raw;
 
 UPDATE stg_lectores
 SET motivo = CASE
-    WHEN cantidad_campos <> 5
-        THEN 'Cantidad de campos distinta de 5'
+    WHEN cantidad_campos IS DISTINCT FROM 5
+        THEN 'tiene ' || COALESCE(cantidad_campos, 0) || ' columnas, se esperaban 5'
+    WHEN documento = ''
+        THEN 'documento vacío'
     WHEN documento !~ '^[0-9]{6,15}$'
-        THEN 'Documento debe contener entre 6 y 15 dígitos'
+        THEN 'documento no numérico o de longitud inválida'
     WHEN nombres = ''
-        THEN 'Nombres obligatorios'
+        THEN 'nombres vacío'
     WHEN char_length(nombres) > 100
-        THEN 'Nombres superan 100 caracteres'
+        THEN 'nombres supera 100 caracteres'
     WHEN apellidos = ''
-        THEN 'Apellidos obligatorios'
+        THEN 'apellidos vacío'
     WHEN char_length(apellidos) > 100
-        THEN 'Apellidos superan 100 caracteres'
+        THEN 'apellidos supera 100 caracteres'
     WHEN correo = ''
-        THEN 'Correo obligatorio'
+        THEN 'correo vacío'
     WHEN char_length(correo) > 150
-        THEN 'Correo supera 150 caracteres'
+        THEN 'correo supera 150 caracteres'
     WHEN correo !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
-        THEN 'Formato de correo inválido'
+        THEN 'correo mal formado'
     WHEN telefono <> ''
          AND telefono !~ '^[0-9]{7,15}$'
-        THEN 'Teléfono debe tener entre 7 y 15 dígitos'
+        THEN 'teléfono no numérico o de longitud inválida'
     WHEN EXISTS (
         SELECT 1
         FROM biblioteca.usuario u
         WHERE u."documento" = stg_lectores.documento
     )
-        THEN 'Documento ya existe en Usuario'
+        THEN 'documento ya existe'
     WHEN EXISTS (
         SELECT 1
         FROM biblioteca.usuario u
         WHERE lower(u."correo") = lower(stg_lectores.correo)
     )
-        THEN 'Correo ya existe en Usuario'
+        THEN 'correo ya registrado por otro lector'
     ELSE NULL
 END;
 
 UPDATE stg_lectores s
-SET motivo = 'Documento duplicado dentro del archivo'
+SET motivo = 'documento repetido en el archivo'
 WHERE s.motivo IS NULL
   AND EXISTS (
       SELECT 1
@@ -101,7 +103,7 @@ WHERE s.motivo IS NULL
   );
 
 UPDATE stg_lectores s
-SET motivo = 'Correo duplicado dentro del archivo'
+SET motivo = 'correo repetido en el archivo'
 WHERE s.motivo IS NULL
   AND EXISTS (
       SELECT 1
@@ -127,7 +129,7 @@ SELECT
         WHERE lower(r."nombre_rol") = 'lector'
         LIMIT 1
     ),
-    correo,
+    lower(correo),
     crypt(documento, gen_salt('bf')),
     nombres,
     documento,
@@ -152,16 +154,11 @@ WHERE motivo IS NOT NULL;
 
 COMMIT;
 
-SELECT 'Lectores cargados' AS resultado, COUNT(*) AS cantidad
-FROM stg_lectores
-WHERE motivo IS NULL;
+SELECT count(*) FILTER (WHERE motivo IS NULL)     AS cargadas,
+       count(*) FILTER (WHERE motivo IS NOT NULL) AS rechazadas
+FROM stg_lectores;
 
-SELECT 'Filas rechazadas' AS resultado, COUNT(*) AS cantidad
-FROM stg_lectores
-WHERE motivo IS NOT NULL;
-
-SELECT motivo, COUNT(*) AS cantidad
+SELECT linea, motivo, contenido
 FROM stg_lectores
 WHERE motivo IS NOT NULL
-GROUP BY motivo
-ORDER BY motivo;
+ORDER BY linea;

@@ -1,14 +1,13 @@
-# Entorno compartido del curso: PostgreSQL + pgAdmin + Node.js
+# Entorno compartido del curso: PostgreSQL + pgAdmin
 #
 # Pensado para docencia, no para producción: credenciales simples con valores
-# por defecto, todo corre en localhost, y las tres carpetas que monta cada
-# servicio (postgres/, pgadmin/, node/) son la única parte que un estudiante
+# por defecto, todo corre en localhost, y las carpetas que monta cada
+# servicio (data/, init/, scripts/, pgadmin/) son la única parte que un estudiante
 # necesita tocar semana a semana. Ver README.md de esta carpeta para el uso.
 
 services:
   postgres:
     image: postgres:16
-    container_name: curso_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-curso}
@@ -24,14 +23,14 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       # Datos de la base de datos: persisten entre "docker compose down/up".
-      - ./postgres/data:/var/lib/postgresql/data
+      - ./data:/var/lib/postgresql/data
       # Scripts que se ejecutan UNA sola vez, en orden alfabético, la primera
       # vez que se crea la base (carpeta de datos vacía). Ideal para el
       # esquema + datos semilla de cada práctica.
-      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./init:/docker-entrypoint-initdb.d:ro
       # Scripts sueltos para correr a mano cuantas veces se quiera con psql,
       # sin que se disparen automáticamente.
-      - ./postgres/scripts:/scripts:ro
+      - ./scripts:/scripts:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-curso} -d ${POSTGRES_DB:-curso}"]
       interval: 5s
@@ -40,7 +39,6 @@ services:
 
   pgadmin:
     image: dpage/pgadmin4:8
-    container_name: curso_pgadmin
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-estudiante@curso.edu.co}
@@ -67,39 +65,5 @@ services:
       postgres:
         condition: service_healthy
 
-  node:
-    image: node:20-alpine
-    container_name: curso_node
-    restart: unless-stopped
-    working_dir: /usr/src/app
-    environment:
-      PORT: ${NODE_PORT:-3000}
-      # Variables estándar de libpq: la librería `pg` las lee solas con
-      # `new Pool()` sin necesidad de pasarle credenciales en el código.
-      PGHOST: postgres
-      PGPORT: 5432
-      PGUSER: ${POSTGRES_USER:-curso}
-      PGPASSWORD: ${POSTGRES_PASSWORD:-curso}
-      PGDATABASE: ${POSTGRES_DB:-curso}
-      DATABASE_URL: postgres://${POSTGRES_USER:-curso}:${POSTGRES_PASSWORD:-curso}@postgres:5432/${POSTGRES_DB:-curso}
-    ports:
-      - "${NODE_PORT:-3000}:${NODE_PORT:-3000}"
-    volumes:
-      # El proyecto Node.js de la práctica/proyecto en curso. Se reemplaza el
-      # contenido de esta carpeta cada vez que se cambia de práctica.
-      - ./node/proyecto:/usr/src/app
-      # node_modules vive en un volumen aparte (no en el host) para no
-      # mezclar binarios nativos compilados en Linux con los del sistema
-      # operativo del estudiante, y para que "npm install" no sea lentísimo.
-      - node_modules:/usr/src/app/node_modules
-      - ./node/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
-    entrypoint: ["sh", "/usr/local/bin/docker-entrypoint.sh"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-    tty: true
-    stdin_open: true
-
 volumes:
-  node_modules:
   pgadmin_data:

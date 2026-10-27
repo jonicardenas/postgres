@@ -54,40 +54,45 @@ FROM stg_libros_raw;
 
 UPDATE stg_libros
 SET motivo = CASE
-    WHEN cantidad_campos <> 6
-        THEN 'Cantidad de campos distinta de 6'
+    WHEN cantidad_campos IS DISTINCT FROM 6
+        THEN 'tiene ' || COALESCE(cantidad_campos, 0) || ' columnas, se esperaban 6'
+    WHEN isbn = ''
+        THEN 'isbn vacío'
     WHEN isbn !~ '^[0-9]{13}$'
-        THEN 'ISBN debe contener exactamente 13 dígitos'
+        THEN 'isbn no tiene 13 dígitos'
     WHEN titulo = ''
-        THEN 'Título obligatorio'
+        THEN 'título vacío'
     WHEN char_length(titulo) > 200
-        THEN 'Título supera 200 caracteres'
+        THEN 'título supera 200 caracteres'
     WHEN autor = ''
-        THEN 'Autor obligatorio'
+        THEN 'autor vacío'
     WHEN char_length(autor) > 150
-        THEN 'Autor supera 150 caracteres'
+        THEN 'autor supera 150 caracteres'
     WHEN categoria = ''
-        THEN 'Categoría obligatoria según las reglas de carga'
+        THEN 'categoría vacía'
     WHEN char_length(categoria) > 100
-        THEN 'Categoría supera 100 caracteres'
+        THEN 'categoría supera 100 caracteres'
     WHEN anio !~ '^[0-9]{1,4}$'
-        THEN 'Año de publicación no numérico o vacío'
+        THEN 'año no numérico'
     WHEN anio::INTEGER NOT BETWEEN 1400 AND 2100
-        THEN 'Año de publicación fuera del rango 1400-2100'
+        THEN 'año fuera de rango'
+    WHEN ejemplares ~ '^-[0-9]+$'
+        THEN 'ejemplares negativo'
     WHEN ejemplares !~ '^[0-9]+$'
-        THEN 'Ejemplares disponibles debe ser un entero no negativo'
+        THEN 'ejemplares no numérico'
     WHEN length(ejemplares) > 9
-        THEN 'Cantidad de ejemplares demasiado grande'
-    WHEN isbn IN (
-        SELECT l."isbn"
+        THEN 'ejemplares demasiado grande'
+    WHEN EXISTS (
+        SELECT 1
         FROM biblioteca.libro l
+        WHERE l."isbn" = stg_libros.isbn
     )
-        THEN 'ISBN ya existe en la tabla Libro'
+        THEN 'isbn ya existe en el catálogo'
     ELSE NULL
 END;
 
 UPDATE stg_libros s
-SET motivo = 'ISBN duplicado dentro del archivo'
+SET motivo = 'isbn repetido en el archivo'
 WHERE s.motivo IS NULL
   AND EXISTS (
       SELECT 1
@@ -131,16 +136,11 @@ WHERE motivo IS NOT NULL;
 
 COMMIT;
 
-SELECT 'Libros cargados' AS resultado, COUNT(*) AS cantidad
-FROM stg_libros
-WHERE motivo IS NULL;
+SELECT count(*) FILTER (WHERE motivo IS NULL)     AS cargadas,
+       count(*) FILTER (WHERE motivo IS NOT NULL) AS rechazadas
+FROM stg_libros;
 
-SELECT 'Filas rechazadas' AS resultado, COUNT(*) AS cantidad
-FROM stg_libros
-WHERE motivo IS NOT NULL;
-
-SELECT motivo, COUNT(*) AS cantidad
+SELECT linea, motivo, contenido
 FROM stg_libros
 WHERE motivo IS NOT NULL
-GROUP BY motivo
-ORDER BY motivo;
+ORDER BY linea;

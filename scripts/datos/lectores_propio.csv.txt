@@ -1,9 +1,0 @@
-documento,nombres,apellidos,correo,telefono
-1010101010,Carlos,Pérez,carlos.perez@email.com,3001234567
-2020202020,María,Gómez,maria.gomez@email.com,3109876543
-3030303030,Luis,Rodríguez,luis.rodriguez@email.com,3201112233
-4040404040,Ana,Martínez,ana.martinez@email.com,3154445566
-5050505050,Jorge,López,jorge.lopez@email.com,3187778899
-1010101010,Carlos Duplicado,Pérez,carlos.duplicado@email.com,3001234567
-606060,Correo Mal Formado,Prueba,correo-sin-arroba,3001234567
-7070707070,Teléfono Corto,Prueba,telefono.corto@email.com,12345
