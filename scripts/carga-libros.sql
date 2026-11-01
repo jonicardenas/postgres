@@ -28,6 +28,9 @@ CREATE TEMP TABLE stg_libros (
 
 BEGIN;
 
+DELETE FROM biblioteca.rechazo_carga
+WHERE archivo = :'archivo';
+
 COPY stg_libros_raw (contenido)
 FROM :'archivo'
 WITH (FORMAT text);
