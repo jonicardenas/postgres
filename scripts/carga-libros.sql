@@ -6,14 +6,26 @@
   \set archivo /scripts/datos/libros_semilla.csv
 \endif
 
-DROP TABLE IF EXISTS pg_temp.stg_libros_raw;
-CREATE TEMP TABLE stg_libros_raw (
+DROP SCHEMA IF EXISTS carga_libros CASCADE;
+CREATE SCHEMA carga_libros;
+SET search_path TO carga_libros, biblioteca;
+
+CREATE TABLE rechazo_carga (
+    "PK_id_rechazo" BIGINT GENERATED ALWAYS AS IDENTITY,
+    "archivo" TEXT NOT NULL,
+    "linea" INTEGER NOT NULL,
+    "contenido" TEXT NOT NULL,
+    "motivo" TEXT NOT NULL,
+    "fecha_rechazo" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_rechazo_carga PRIMARY KEY ("PK_id_rechazo")
+);
+
+CREATE TABLE stg_libros_raw (
     linea BIGINT GENERATED ALWAYS AS IDENTITY,
     contenido TEXT NOT NULL
 );
 
-DROP TABLE IF EXISTS pg_temp.stg_libros;
-CREATE TEMP TABLE stg_libros (
+CREATE TABLE stg_libros (
     linea BIGINT,
     contenido TEXT,
     cantidad_campos INTEGER,
@@ -27,6 +39,8 @@ CREATE TEMP TABLE stg_libros (
 );
 
 BEGIN;
+
+TRUNCATE stg_libros_raw, stg_libros RESTART IDENTITY;
 
 COPY stg_libros_raw (contenido)
 FROM :'archivo'
@@ -120,7 +134,16 @@ SELECT
 FROM stg_libros
 WHERE motivo IS NULL;
 
-INSERT INTO biblioteca.rechazo_carga (
+INSERT INTO biblioteca.ejemplares ("FK_id_libro")
+SELECT
+    l."PK_id_libro"
+FROM stg_libros s
+JOIN biblioteca.libro l
+  ON l."isbn" = s.isbn
+CROSS JOIN LATERAL generate_series(1, s.ejemplares::INTEGER)
+WHERE s.motivo IS NULL;
+
+INSERT INTO rechazo_carga (
     "archivo",
     "linea",
     "contenido",

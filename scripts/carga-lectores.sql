@@ -8,14 +8,26 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-DROP TABLE IF EXISTS pg_temp.stg_lectores_raw;
-CREATE TEMP TABLE stg_lectores_raw (
+DROP SCHEMA IF EXISTS carga_lectores CASCADE;
+CREATE SCHEMA carga_lectores;
+SET search_path TO carga_lectores, biblioteca;
+
+CREATE TABLE rechazo_carga (
+    "PK_id_rechazo" BIGINT GENERATED ALWAYS AS IDENTITY,
+    "archivo" TEXT NOT NULL,
+    "linea" INTEGER NOT NULL,
+    "contenido" TEXT NOT NULL,
+    "motivo" TEXT NOT NULL,
+    "fecha_rechazo" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_rechazo_carga PRIMARY KEY ("PK_id_rechazo")
+);
+
+CREATE TABLE stg_lectores_raw (
     linea BIGINT GENERATED ALWAYS AS IDENTITY,
     contenido TEXT NOT NULL
 );
 
-DROP TABLE IF EXISTS pg_temp.stg_lectores;
-CREATE TEMP TABLE stg_lectores (
+CREATE TABLE stg_lectores (
     linea BIGINT,
     contenido TEXT,
     cantidad_campos INTEGER,
@@ -28,6 +40,8 @@ CREATE TEMP TABLE stg_lectores (
 );
 
 BEGIN;
+
+TRUNCATE stg_lectores_raw, stg_lectores RESTART IDENTITY;
 
 COPY stg_lectores_raw (contenido)
 FROM :'archivo'
@@ -130,7 +144,7 @@ SELECT
         LIMIT 1
     ),
     lower(correo),
-    crypt(documento, gen_salt('bf')),
+    public.crypt(documento, public.gen_salt('bf')),
     nombres,
     documento,
     apellidos,
@@ -138,7 +152,7 @@ SELECT
 FROM stg_lectores
 WHERE motivo IS NULL;
 
-INSERT INTO biblioteca.rechazo_carga (
+INSERT INTO rechazo_carga (
     "archivo",
     "linea",
     "contenido",

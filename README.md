@@ -29,7 +29,7 @@ docker compose logs postgres    # si el esquema tuviera un error, se ve aquí
 docker compose exec postgres psql -U curso -d curso -c '\dt biblioteca.*'
 ```
 
-El último comando debe listar las tablas `rol`, `usuario`, `libro`, `prestamo`, `devolucion` y `rechazo_carga`.
+El último comando debe listar las tablas `rol`, `usuario`, `libro`, `ejemplares`, `prestamo` y `devolucion`.
 Si se quiere usar pgAdmin: `docker compose up -d pgadmin` y abrir http://localhost:5050.
 
 Lo que hay en `init/` solo se ejecuta cuando la carpeta `data/` está vacía, así que cada vez que cambiemos `01_esquema.sql` toca borrar los datos y volver a levantar:
@@ -62,8 +62,11 @@ docker compose exec postgres psql -U curso -d curso \
   -v archivo=/scripts/datos/lectores_propio.txt -f /scripts/carga-lectores.sql
 # Bitácora de rechazos
 docker compose exec postgres psql -U curso -d curso \
-  -c 'SELECT archivo, linea, motivo, contenido FROM biblioteca.rechazo_carga ORDER BY fecha_rechazo, linea'
+  -c 'SELECT archivo, linea, motivo, contenido FROM carga_libros.rechazo_carga ORDER BY fecha_rechazo, linea'
 ```
+
+La bitácora de lectores se consulta de la misma forma en
+`carga_lectores.rechazo_carga`.
 
 Los `\` al final de línea son de bash. En PowerShell hay que escribir cada comando en una sola línea (o usar el acento grave `` ` `` en lugar de `\`).
 
@@ -73,7 +76,7 @@ Los CSV de lectores no traen contraseña. Como el esquema la exige, el script us
 
 ## Mapeo CSV → esquema
 
-Cada script lee el archivo completo como texto en una tabla temporal, y ahí marca cada fila con un motivo de rechazo usando un `UPDATE … SET motivo = CASE …` (gana la primera regla que falla). Después pasa a la tabla final las filas sin motivo con un `INSERT … SELECT` y guarda las demás en `biblioteca.rechazo_carga`. Todo va dentro de un `BEGIN … COMMIT`. A todos los campos se les aplica `trim()`.
+Cada script lee el archivo completo como texto en tablas de staging y ahí marca cada fila con un motivo de rechazo usando un `UPDATE … SET motivo = CASE …` (gana la primera regla que falla). Las cargas crean sus propios esquemas (`carga_lectores` y `carga_libros`) dentro de los scripts, como en el demo, para que sus tablas de paso y `rechazo_carga` no aparezcan en `public` ni en `biblioteca`. Antes de cada ejecución vacían y reutilizan las tablas de staging. Después pasan a las tablas finales de `biblioteca` las filas sin motivo con un `INSERT … SELECT`. Todo va dentro de un `BEGIN … COMMIT`. A todos los campos se les aplica `trim()`.
 
 ### Libros (`isbn,titulo,autor,categoria,anio_publicacion,ejemplares_disponibles`)
 
@@ -86,6 +89,10 @@ Cada script lee el archivo completo como texto en una tabla temporal, y ahí mar
 | `categoria` | `libro.categoria` | — | no vacía (`categoría vacía`); ≤ 100 (`categoría supera 100 caracteres`) |
 | `anio_publicacion` | `libro.anio_publicacion` | `::integer` | 1–4 dígitos (`año no numérico`); entre 1400 y 2100, igual que `ck_libro_anio` (`año fuera de rango`) |
 | `ejemplares_disponibles` | `libro.ejemplares_disponibles` | `::integer` | no negativo (`ejemplares negativo`); solo dígitos (`ejemplares no numérico`); ≤ 9 dígitos (`ejemplares demasiado grande`) |
+
+Cada libro válido también crea en `ejemplares` una fila por cada unidad indicada
+en `ejemplares_disponibles`, asociada mediante `FK_id_libro` y con estado inicial
+`disponible`. Las filas rechazadas no crean libros ni ejemplares.
 
 ### Lectores (`documento,nombres,apellidos,correo,telefono`)
 
