@@ -7,3 +7,7 @@ data/*
 
 # Variables de entorno locales; la plantilla versionada es .env.example.
 .env
+
+# Copias de seguridad locales
+README_respaldo.md
+scripts/*.bak-check

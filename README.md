@@ -70,7 +70,7 @@ La bitácora de lectores se consulta de la misma forma en
 
 Los `\` al final de línea son de bash. En PowerShell hay que escribir cada comando en una sola línea (o usar el acento grave `` ` `` en lugar de `\`).
 
-Si se repite el paso 1 o el 3 no se duplica nada: todas las filas salen rechazadas con «isbn ya existe en el catálogo» (o «documento ya existe» en el caso de los lectores).
+Si se repite una carga, los registros existentes no se duplican: los libros se rechazan por «isbn ya existe en el catálogo» y los lectores por «documento ya existe». Comprobamos este comportamiento repitiendo la carga de `lectores_semilla.csv`: en la primera ejecución se insertaron 20 lectores y no hubo rechazos; en la segunda se insertaron 0 y se rechazaron los 20 registros por documento ya existente.
 
 Los CSV de lectores no traen contraseña. Como el esquema la exige, el script usa el documento como clave inicial y guarda solo el hash bcrypt que genera `pgcrypto` (`crypt(documento, gen_salt('bf'))`), así que la clave nunca queda en texto plano.
 
@@ -115,7 +115,7 @@ El criterio que seguimos fue el mismo para todos los casos. Corregimos solo lo q
 |---|---|---|---|---|---|
 | 1 | libros, 2 | ISBN que ya está en el catálogo | Rechazar | isbn ya existe en el catálogo | Sumar ejemplares sin confirmación alteraría el inventario; permite repetir la carga sin duplicar |
 | 2 | libros, 3 | Título vacío | Rechazar | título vacío | No se puede inventar |
-| 3 | libros, 4 | Texto «dos» donde va el año | Rechazar | año no numérico | No se interpreta lenguaje natural |
+| 3 | libros, 4 | Texto «dos» donde van los ejemplares disponibles | Rechazar | ejemplares no numérico | No se puede interpretar como una cantidad numérica |
 | 4 | libros, 5 | Año en números romanos (MCMXLIX) | Rechazar | año no numérico | Convertirlo sería adivinar |
 | 5 | libros, 6 | 7 columnas en vez de 6 | Rechazar | tiene 7 columnas, se esperaban 6 | No se sabe qué campo sobra |
 | 6 | libros, 7 | Autor vacío | Rechazar | autor vacío | Obligatorio en el esquema |
@@ -167,7 +167,7 @@ Salidas de `psql` de las cargas, corridas sobre una base recién creada y en el 
 -------+----------------------------------+---------------------------------------------------------------------------------------------
      2 | isbn ya existe en el catálogo    | 9780000000001,Cien años de soledad (edición duplicada),Gabriel García Márquez,Novela,1967,2
      3 | título vacío                     | 9780000000033,,Julio Cortázar,Novela,1963,3
-     4 | año no numérico                  | 9780000000034,Relato sin ejemplares numéricos,Autor de Prueba,Novela,dos,3
+     4 | ejemplares no numérico | 9780000000034,Relato sin ejemplares numéricos,Autor de Prueba,Novela,2003,dos
      5 | año no numérico                  | 9780000000035,Relato con año inválido,Autor de Prueba,Novela,MCMXLIX,2
      6 | tiene 7 columnas, se esperaban 6 | 9780000000036,Relato con columna de más,Autor de Prueba,Novela,1999,2,columna_sobrante
      7 | autor vacío                      | 9780000000037,Relato sin autor,,Novela,2005,1
@@ -235,15 +235,34 @@ Salidas de `psql` de las cargas, corridas sobre una base recién creada y en el 
 
 ## Prueba de la última línea de defensa
 
-Hicimos una copia de `carga-libros.sql` sin la regla `ejemplares negativo` del `CASE` y cargamos con ella `libros_semilla_con_errores.csv`. Ahora la fila con -3 ejemplares sí llega al `INSERT` y la rechaza el esquema:
+Para comprobar que las restricciones `CHECK` del esquema funcionan como última línea de defensa, realizamos una prueba controlada con un archivo temporal llamado `libro_check_prueba.csv`.
 
+El archivo contenía un libro con el valor `-1` en el campo `ejemplares_disponibles`, que normalmente debe ser rechazado por la validación del script.
+
+Primero intentamos desactivar la regla `ejemplares negativo` del `CASE`, pero la expresión regular de validación seguía rechazando el valor negativo. Por eso, para la segunda prueba modificamos temporalmente la expresión regular para permitir números negativos y desactivamos la regla correspondiente del `CASE`.
+
+De esta manera, el registro llegó al `INSERT` y PostgreSQL lo rechazó mediante la restricción:
+
+```text
+ERROR: new row for relation "libro" violates check constraint "ck_libro_ejemplares"
 ```
-ERROR:  new row for relation "libro" violates check constraint "ck_libro_ejemplares"
-DETAIL:  Failing row contains (38, Relato con ejemplares negativos, Autor de Prueba, null, -3, 2015, Novela, 9780000000038).
-```
 
-**¿Qué pasa con las demás filas?** No entra ninguna. El `INSERT … SELECT` es una sola sentencia y si una fila falla se cae completa; como el script usa `ON_ERROR_STOP`, la transacción se aborta y se deshace. En este archivo las otras 7 filas ya estaban rechazadas por otras reglas, pero si el archivo hubiera tenido filas buenas junto a la mala, ninguna se habría cargado.
+**¿Qué pasa con las demás filas?**
 
-**¿Y la bitácora?** No cambia: tenía 20 filas antes de la prueba y 20 después. El `INSERT` en `rechazo_carga` va después del de `libro` y nunca se ejecuta, entonces se pierde el registro de qué se rechazó y por qué.
+El `INSERT ... SELECT` es una sola sentencia. Si una fila incumple una restricción, la sentencia completa falla. Como el script utiliza `ON_ERROR_STOP` y una transacción, se revierte la operación y no se insertan parcialmente los registros.
 
-Con esto vimos que el `CHECK` del esquema sí protege la tabla, pero un solo error tumba toda la carga y además el mensaje es del motor y no del negocio. Por eso las reglas del `CASE` tienen que atrapar la fila antes; las restricciones quedan como última defensa. Después de la prueba dejamos la regla otra vez en el script del repositorio.
+**¿Qué pasa con la bitácora?**
+
+La ejecución que provoca el error de `CHECK` también se revierte. Por tanto, no se guarda un nuevo rechazo correspondiente a esa ejecución. El rechazo que encontramos después corresponde al primer intento, en el que la validación del script todavía detectaba el valor negativo.
+
+**Comprobación posterior**
+
+Después de la prueba restauramos el script original y verificamos que:
+
+- El catálogo conserva sus 37 libros.
+- El libro temporal de prueba no fue insertado.
+- La bitácora conserva un rechazo correspondiente al primer intento.
+
+Con esta prueba comprobamos que las restricciones `CHECK` protegen la tabla incluso si una validación del script falla o se desactiva accidentalmente. Sin embargo, también observamos que un error en una sola fila puede cancelar toda la sentencia de inserción y provocar que no se registre la bitácora de esa ejecución.
+
+Por eso es importante mantener las validaciones del `CASE` en los scripts de carga y las restricciones del esquema como última defensa.
