@@ -1,4 +1,4 @@
-﻿-- ============================================================
+-- ============================================================
 -- S16 - PARTE B: DATOS DE PRUEBA
 -- Esquema: biblioteca
 --
@@ -118,30 +118,40 @@ VALUES
 -- ------------------------------------------------------------
 
 INSERT INTO biblioteca.devolucion (
-    "PK_id_devolucion",
     "FK_id_prestamo",
+    "FK_id_ejemplar",
     estado_devolucion,
     fecha_devolucion
 )
-VALUES
-    (15, 1001, 'a_tiempo', CURRENT_DATE - 42),
-    (16, 1002, 'a_tiempo', CURRENT_DATE - 35),
-    (17, 1003, 'tardia',   CURRENT_DATE - 25),
-    (18, 1004, 'a_tiempo', CURRENT_DATE - 21),
-
-    (19, 1008, 'a_tiempo', CURRENT_DATE - 39),
-    (20, 1009, 'a_tiempo', CURRENT_DATE - 34),
-    (21, 1010, 'a_tiempo', CURRENT_DATE - 29),
-    (22, 1011, 'a_tiempo', CURRENT_DATE - 20),
-
-    (23, 1014, 'a_tiempo', CURRENT_DATE - 16),
-    (24, 1015, 'a_tiempo', CURRENT_DATE - 13),
-
-    (25, 1018, 'a_tiempo', CURRENT_DATE - 11),
-    (26, 1019, 'a_tiempo', CURRENT_DATE -  9),
-    (27, 1020, 'a_tiempo', CURRENT_DATE -  8),
-
-    (28, 1023, 'tardia',   CURRENT_DATE -  4);
+SELECT
+    d.id_prestamo,
+    e."PK_id_ejemplar",
+    d.estado_devolucion,
+    d.fecha_devolucion
+FROM (
+    VALUES
+        (1001, 'a_tiempo'::varchar, CURRENT_DATE - 42, 1),
+        (1002, 'a_tiempo'::varchar, CURRENT_DATE - 35, 2),
+        (1003, 'tardia'::varchar,   CURRENT_DATE - 25, 3),
+        (1004, 'a_tiempo'::varchar, CURRENT_DATE - 21, 4),
+        (1008, 'a_tiempo'::varchar, CURRENT_DATE - 39, 1),
+        (1009, 'a_tiempo'::varchar, CURRENT_DATE - 34, 2),
+        (1010, 'a_tiempo'::varchar, CURRENT_DATE - 29, 3),
+        (1011, 'a_tiempo'::varchar, CURRENT_DATE - 20, 6),
+        (1014, 'a_tiempo'::varchar, CURRENT_DATE - 16, 4),
+        (1015, 'a_tiempo'::varchar, CURRENT_DATE - 13, 5),
+        (1018, 'a_tiempo'::varchar, CURRENT_DATE - 11, 1),
+        (1019, 'a_tiempo'::varchar, CURRENT_DATE -  9, 9),
+        (1020, 'a_tiempo'::varchar, CURRENT_DATE -  8, 10),
+        (1023, 'tardia'::varchar,   CURRENT_DATE -  4, 13)
+) AS d(id_prestamo, estado_devolucion, fecha_devolucion, id_libro)
+JOIN biblioteca.ejemplares e
+    ON e."FK_id_libro" = d.id_libro
+   AND e."PK_id_ejemplar" = (
+       SELECT MIN(e2."PK_id_ejemplar")
+       FROM biblioteca.ejemplares e2
+       WHERE e2."FK_id_libro" = d.id_libro
+   );
 
 
 -- ------------------------------------------------------------
@@ -156,16 +166,6 @@ SELECT setval(
     (SELECT MAX("PK_id_prestamo") FROM biblioteca.prestamo),
     true
 );
-
-SELECT setval(
-    pg_get_serial_sequence(
-        'biblioteca.devolucion',
-        'PK_id_devolucion'
-    ),
-    (SELECT MAX("PK_id_devolucion") FROM biblioteca.devolucion),
-    true
-);
-
 
 -- ------------------------------------------------------------
 -- 5. Confirmar la carga.
