@@ -1,0 +1,57 @@
+﻿SET
+SET
+
+== Reporte 1. Los 20 libros más prestados (incluye empates) ==
+ id_libro |               titulo                |          autor           | prestamos 
+----------+-------------------------------------+--------------------------+-----------
+        1 | Cien años de soledad                | Gabriel García Márquez   |         5
+        2 | El amor en los tiempos del cólera   | Gabriel García Márquez   |         4
+        3 | Crónica de una muerte anunciada     | Gabriel García Márquez   |         2
+        5 | Pedro Páramo                        | Juan Rulfo               |         2
+        4 | Rayuela                             | Julio Cortázar           |         2
+       14 | 1984                                | George Orwell            |         1
+       19 | Alicia en el país de las maravillas | Lewis Carroll            |         1
+       20 | Breve historia del tiempo           | Stephen Hawking          |         1
+       11 | Como agua para chocolate            | Laura Esquivel           |         1
+       21 | Cosmos                              | Carl Sagan               |         1
+        9 | Don Quijote de la Mancha            | Miguel de Cervantes      |         1
+        8 | El Aleph                            | Jorge Luis Borges        |         1
+       17 | El principito                       | Antoine de Saint-Exupéry |         1
+       12 | El túnel                            | Ernesto Sábato           |         1
+       16 | Fahrenheit 451                      | Ray Bradbury             |         1
+        7 | Ficciones                           | Jorge Luis Borges        |         1
+        6 | La casa de los espíritus            | Isabel Allende           |         1
+       10 | La sombra del viento                | Carlos Ruiz Zafón        |         1
+       13 | Los detectives salvajes             | Roberto Bolaño           |         1
+       18 | Matilda                             | Roald Dahl               |         1
+       15 | Un mundo feliz                      | Aldous Huxley            |         1
+(21 rows)
+
+
+== Reporte 2. El o los lectores que más libros han leído ==
+ id_usuario | nombres  |    apellidos    | total_libros_leidos 
+------------+----------+-----------------+---------------------
+          1 | Mariana  | Gómez Rojas     |                   4
+          2 | Santiago | Rodríguez Pérez |                   4
+(2 rows)
+
+
+== Reporte 3. Lectores morosos ==
+ documento  |    nombres    |   apellidos   |               correo                |  telefono  
+------------+---------------+---------------+-------------------------------------+------------
+ 1000000001 | Mariana       | Gómez Rojas   | mariana.gomez@correo-ejemplo.edu.co | 3001000001
+ 1000000004 | Juan David    | Martínez Ruiz | juan.martinez@correo-ejemplo.edu.co | 3001000004
+ 1000000008 | Andrés Felipe | Vargas Ortiz  | andres.vargas@correo-ejemplo.edu.co | 3001000008
+(3 rows)
+
+
+== Reporte 4. Préstamos en mora (lista de notificación) ==
+           lector           |               correo                |  telefono  |              titulo               | fecha_vencimiento | dias_mora 
+----------------------------+-------------------------------------+------------+-----------------------------------+-------------------+-----------
+ Mariana Gómez Rojas        | mariana.gomez@correo-ejemplo.edu.co | 3001000001 | Cien años de soledad              | 2026-11-01        |         8
+ Mariana Gómez Rojas        | mariana.gomez@correo-ejemplo.edu.co | 3001000001 | El amor en los tiempos del cólera | 2026-11-03        |         6
+ Juan David Martínez Ruiz   | juan.martinez@correo-ejemplo.edu.co | 3001000004 | Ficciones                         | 2026-11-04        |         5
+ Juan David Martínez Ruiz   | juan.martinez@correo-ejemplo.edu.co | 3001000004 | El Aleph                          | 2026-11-05        |         4
+ Andrés Felipe Vargas Ortiz | andres.vargas@correo-ejemplo.edu.co | 3001000008 | El túnel                          | 2026-11-08        |         1
+(5 rows)
+

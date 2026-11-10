@@ -1,152 +1,159 @@
-﻿-- ============================================================
--- S16 - REPORTES DE LA BIBLIOTECA
--- Esquema: biblioteca
--- Zona horaria: America/Bogota
+-- S16. Parte B: los cuatro reportes del proyecto sobre biblioteca.
 --
--- Criterios:
--- 1. El top 20 excluye libros sin prestamos.
--- 2. Los empates en el puesto 20 se resuelven por titulo ASC.
--- 3. Los libros leidos se cuentan mediante devoluciones.
--- 4. Se conservan todos los lectores empatados en el primer lugar.
--- 5. Un prestamo moroso tiene vencimiento anterior a CURRENT_DATE
---    y no tiene una devolucion registrada.
--- 6. Un prestamo que vence hoy no se considera moroso.
--- ============================================================
+-- Esta versión parte de scripts/S15-reportes.sql y adapta lo solicitado en S16:
+-- - Top 20 parte del catálogo con LEFT JOIN y conserva empates con WITH TIES.
+-- - "Libros leídos" son préstamos con devolución y conserva empates con MAX.
+-- - Lectores morosos usa EXISTS para que cada lector aparezca una sola vez.
+-- - Préstamos en mora lista cada préstamo para notificación con días calculados.
+-- - La mora se evalúa dinámicamente con fechas (< CURRENT_DATE y sin devolución).
+
+\set ON_ERROR_STOP on
 
 SET TIME ZONE 'America/Bogota';
+SET search_path TO biblioteca;
 
 
 -- ============================================================
--- REPORTE 1: TOP 20 LIBROS MAS PRESTADOS
---
--- Los libros sin prestamos no aparecen debido al INNER JOIN.
--- Si hay empate en el limite del top 20, se prioriza el titulo
--- en orden alfabetico para obtener exactamente 20 resultados.
+-- Reporte 1: Los 20 libros más prestados (incluye empates)
+-- Devuelve: id_libro, titulo, autor, prestamos.
+-- Decisiones: LEFT JOIN para incluir catálogo completo (0 préstamos)
+-- y FETCH FIRST 20 ROWS WITH TIES para no amputar empates del límite.
+-- Esperado: 21 filas (5 con >= 2 préstamos + 16 empatados con 1).
 -- ============================================================
 
-SELECT
-    l."PK_id_libro" AS id_libro,
-    l.titulo,
-    l.autor,
-    COUNT(p."PK_id_prestamo") AS total_prestamos
-FROM biblioteca.libro l
-INNER JOIN biblioteca.prestamo p
-    ON p."FK_id_libro" = l."PK_id_libro"
-GROUP BY
-    l."PK_id_libro",
-    l.titulo,
-    l.autor
-ORDER BY
-    total_prestamos DESC,
-    l.titulo ASC
-LIMIT 20;
-
-
--- ============================================================
--- REPORTE 2: LECTORES CON MAS LIBROS LEIDOS
---
--- Se cuentan las devoluciones registradas. Como cada prestamo
--- admite una sola devolucion, cada devolucion cuenta un libro.
--- Se conservan todos los lectores empatados en el maximo.
--- Los lectores sin devoluciones no participan en el ranking.
--- ============================================================
-
-WITH libros_leidos AS (
+\echo
+\echo '== Reporte 1. Los 20 libros más prestados (incluye empates) =='
+WITH prestamos_por_libro AS (
     SELECT
-        u."PK_id_usuario" AS id_usuario,
-        u.nombres,
-        u.apellidos,
-        COUNT(d."FK_id_prestamo") AS total_libros_leidos
-    FROM biblioteca.usuario u
-    INNER JOIN biblioteca.prestamo p
-        ON p."FK_id_usuario" = u."PK_id_usuario"
-    INNER JOIN biblioteca.devolucion d
-        ON d."FK_id_prestamo" = p."PK_id_prestamo"
+        l."PK_id_libro" AS id_libro,
+        l."titulo" AS titulo,
+        l."autor" AS autor,
+        COUNT(p."PK_id_prestamo") AS prestamos
+    FROM biblioteca.libro l
+    LEFT JOIN biblioteca.prestamo p
+        ON p."FK_id_libro" = l."PK_id_libro"
     GROUP BY
-        u."PK_id_usuario",
-        u.nombres,
-        u.apellidos
+        l."PK_id_libro",
+        l."titulo",
+        l."autor"
+),
+top_20 AS (
+    SELECT *
+    FROM prestamos_por_libro
+    ORDER BY prestamos DESC
+    FETCH FIRST 20 ROWS WITH TIES
 )
 SELECT
-    id_usuario,
-    nombres,
-    apellidos,
-    total_libros_leidos
-FROM libros_leidos
-WHERE total_libros_leidos = (
-    SELECT MAX(total_libros_leidos)
-    FROM libros_leidos
-)
-ORDER BY id_usuario;
+    id_libro,
+    titulo,
+    autor,
+    prestamos
+FROM top_20
+ORDER BY prestamos DESC, titulo ASC;
 
 
 -- ============================================================
--- REPORTE 3: LECTORES MOROSOS
---
--- Cada lector aparece una sola vez, aunque tenga varios
--- prestamos vencidos sin devolver.
--- Se considera moroso si la fecha de vencimiento es anterior
--- a CURRENT_DATE y no existe una devolucion registrada.
+-- Reporte 2: El o los lectores que más libros han leído
+-- Devuelve: id_usuario, nombres, apellidos, total_libros_leidos.
+-- Decisiones: solo préstamos con devolución registrada; conserva
+-- empates comparando con MAX(); filtra usuarios con rol 'lector'.
+-- Esperado: 2 filas (Mariana Gómez y Santiago Rodríguez con 4 leídos).
 -- ============================================================
 
-SELECT
-    u."PK_id_usuario" AS id_usuario,
-    u.nombres,
-    u.apellidos,
-    u.correo,
-    u.telefono
-FROM biblioteca.usuario u
-WHERE EXISTS (
-    SELECT 1
+\echo
+\echo '== Reporte 2. El o los lectores que más libros han leído =='
+WITH leidos AS (
+    SELECT
+        p."FK_id_usuario" AS id_usuario,
+        COUNT(DISTINCT p."PK_id_prestamo") AS devueltos
     FROM biblioteca.prestamo p
-    WHERE p."FK_id_usuario" = u."PK_id_usuario"
-      AND p.estado_prestamo <> 'devuelto'
-      AND p.fecha_vencimiento < CURRENT_DATE
-      AND NOT EXISTS (
-          SELECT 1
-          FROM biblioteca.devolucion d
-          WHERE d."FK_id_prestamo" = p."PK_id_prestamo"
-      )
+    JOIN biblioteca.devolucion d
+        ON d."FK_id_prestamo" = p."PK_id_prestamo"
+    GROUP BY p."FK_id_usuario"
+),
+maximo AS (
+    SELECT MAX(devueltos) AS devueltos
+    FROM leidos
 )
-ORDER BY u."PK_id_usuario";
-
-
--- ============================================================
--- REPORTE 4: DETALLE DE PRESTAMOS VENCIDOS
---
--- Muestra cada prestamo moroso individualmente, con los datos
--- del libro y del lector, y calcula los dias de retraso.
--- Excluye prestamos devueltos y los que vencen hoy.
--- ============================================================
-
 SELECT
-    p."PK_id_prestamo" AS id_prestamo,
-    l.titulo AS libro,
     u."PK_id_usuario" AS id_usuario,
-    u.nombres,
-    u.apellidos,
-    u.correo,
-    u.telefono,
-    p.fecha_prestamo,
-    p.fecha_vencimiento,
-    CURRENT_DATE - p.fecha_vencimiento AS dias_retraso
+    u."nombres",
+    u."apellidos",
+    x.devueltos AS total_libros_leidos
+FROM leidos x
+JOIN maximo m
+    ON m.devueltos = x.devueltos
+JOIN biblioteca.usuario u
+    ON u."PK_id_usuario" = x.id_usuario
+JOIN biblioteca.rol r
+    ON r."PK_id_rol" = u."FK_id_rol"
+WHERE lower(r."nombre_rol") = 'lector'
+ORDER BY u."apellidos", u."nombres", u."PK_id_usuario";
+
+
+-- ============================================================
+-- Reporte 3: Lectores morosos
+-- Devuelve: documento, nombres, apellidos, correo, telefono.
+-- Decisiones: EXISTS garantiza una fila por lector; condición
+-- fecha_vencimiento < CURRENT_DATE y sin registro en devolución.
+-- Esperado: 3 filas (Mariana Gómez, Juan David Martínez, Andrés Felipe Vargas).
+-- ============================================================
+
+\echo
+\echo '== Reporte 3. Lectores morosos =='
+SELECT
+    u."documento",
+    u."nombres",
+    u."apellidos",
+    u."correo",
+    u."telefono"
+FROM biblioteca.usuario u
+JOIN biblioteca.rol r
+    ON r."PK_id_rol" = u."FK_id_rol"
+WHERE lower(r."nombre_rol") = 'lector'
+  AND EXISTS (
+      SELECT 1
+      FROM biblioteca.prestamo p
+      WHERE p."FK_id_usuario" = u."PK_id_usuario"
+        AND p."fecha_vencimiento" < CURRENT_DATE
+        AND NOT EXISTS (
+            SELECT 1
+            FROM biblioteca.devolucion d
+            WHERE d."FK_id_prestamo" = p."PK_id_prestamo"
+        )
+  )
+ORDER BY u."apellidos", u."nombres", u."PK_id_usuario";
+
+
+-- ============================================================
+-- Reporte 4: Préstamos en mora (lista de notificación)
+-- Devuelve: lector, correo, telefono, titulo, fecha_vencimiento, dias_mora.
+-- Decisiones: nivel de detalle por préstamo; calcula dias_mora
+-- dinámicamente con fechas; ordenado por dias_mora DESC.
+-- Esperado: 5 filas (2 de Mariana, 2 de Juan David, 1 de Andrés Felipe).
+-- ============================================================
+
+\echo
+\echo '== Reporte 4. Préstamos en mora (lista de notificación) =='
+SELECT
+    u."nombres" || ' ' || u."apellidos" AS lector,
+    u."correo",
+    u."telefono",
+    l."titulo",
+    p."fecha_vencimiento",
+    CURRENT_DATE - p."fecha_vencimiento" AS dias_mora
 FROM biblioteca.prestamo p
-INNER JOIN biblioteca.usuario u
+JOIN biblioteca.usuario u
     ON u."PK_id_usuario" = p."FK_id_usuario"
-INNER JOIN biblioteca.libro l
+JOIN biblioteca.rol r
+    ON r."PK_id_rol" = u."FK_id_rol"
+JOIN biblioteca.libro l
     ON l."PK_id_libro" = p."FK_id_libro"
-WHERE p.estado_prestamo <> 'devuelto'
-  AND p.fecha_vencimiento < CURRENT_DATE
+WHERE lower(r."nombre_rol") = 'lector'
+  AND p."fecha_vencimiento" < CURRENT_DATE
   AND NOT EXISTS (
       SELECT 1
       FROM biblioteca.devolucion d
       WHERE d."FK_id_prestamo" = p."PK_id_prestamo"
   )
-ORDER BY
-    p.fecha_vencimiento ASC,
-    u."PK_id_usuario" ASC;
-
-
--- ============================================================
--- FIN DE LOS REPORTES S16
--- ============================================================
+ORDER BY dias_mora DESC, u."apellidos", u."nombres", l."titulo";
