@@ -235,3 +235,193 @@ ROLLBACK;
 --numerada; con detalle_formula basta buscar en una sola columna.
 --3. Muchas fórmulas tienen menos medicamentos que columnas disponibles, por
 --lo que los pares adicionales quedarían en NULL y harían más dispersos los datos.
+
+
+
+-- Caso 4:
+
+BEGIN;
+
+ALTER TABLE envios.envio RENAME TO envio_original;
+
+
+CREATE TABLE envios.zona (
+    id_zona SMALLINT PRIMARY KEY
+);
+
+
+CREATE TABLE envios.ciudad (
+    ciudad_destino VARCHAR(40) PRIMARY KEY,
+    departamento VARCHAR(40) NOT NULL,
+    id_zona SMALLINT NOT NULL
+        REFERENCES envios.zona(id_zona)
+);
+
+
+CREATE TABLE envios.tarifa_zona (
+    id_tarifa INTEGER PRIMARY KEY,
+    id_zona SMALLINT NOT NULL
+        REFERENCES envios.zona(id_zona),
+    tarifa_kg INTEGER NOT NULL CHECK (tarifa_kg > 0),
+    vigente_desde DATE NOT NULL,
+    vigente_hasta DATE,
+    CHECK (
+        vigente_hasta IS NULL
+        OR vigente_hasta >= vigente_desde
+    )
+);
+
+
+CREATE TABLE envios.envio (
+    num_guia CHAR(3) PRIMARY KEY,
+    fecha DATE NOT NULL,
+    ciudad_destino VARCHAR(40) NOT NULL
+        REFERENCES envios.ciudad(ciudad_destino),
+    id_tarifa INTEGER NOT NULL
+        REFERENCES envios.tarifa_zona(id_tarifa),
+    peso_kg NUMERIC(5,1) NOT NULL CHECK (peso_kg > 0),
+    valor_facturado INTEGER NOT NULL
+        CHECK (valor_facturado >= 0)
+);
+
+
+INSERT INTO envios.zona (id_zona)
+SELECT DISTINCT zona
+FROM envios.envio_original
+ORDER BY zona;
+
+
+INSERT INTO envios.ciudad (
+    ciudad_destino,
+    departamento,
+    id_zona
+)
+SELECT DISTINCT
+    ciudad_destino,
+    departamento,
+    zona
+FROM envios.envio_original
+ORDER BY ciudad_destino;
+
+
+INSERT INTO envios.tarifa_zona (
+    id_tarifa,
+    id_zona,
+    tarifa_kg,
+    vigente_desde,
+    vigente_hasta
+)
+SELECT
+    zona,
+    zona,
+    MIN(tarifa_kg),
+    MIN(fecha),
+    NULL
+FROM envios.envio_original
+GROUP BY zona
+ORDER BY zona;
+
+
+INSERT INTO envios.envio (
+    num_guia,
+    fecha,
+    ciudad_destino,
+    id_tarifa,
+    peso_kg,
+    valor_facturado
+)
+SELECT
+    o.num_guia,
+    o.fecha,
+    o.ciudad_destino,
+    t.id_tarifa,
+    o.peso_kg,
+    o.valor
+FROM envios.envio_original o
+JOIN envios.ciudad c
+    ON c.ciudad_destino = o.ciudad_destino
+   AND c.id_zona = o.zona
+JOIN envios.tarifa_zona t
+    ON t.id_zona = c.id_zona
+   AND t.tarifa_kg = o.tarifa_kg
+   AND o.fecha >= t.vigente_desde
+   AND (
+       t.vigente_hasta IS NULL
+       OR o.fecha <= t.vigente_hasta
+   );
+
+
+CREATE VIEW envios.validacion_tarifas AS
+SELECT
+    e.num_guia,
+    e.fecha,
+    e.ciudad_destino,
+    c.id_zona AS zona_ciudad,
+    e.id_tarifa,
+    t.id_zona AS zona_tarifa,
+    t.tarifa_kg,
+    CASE
+        WHEN c.id_zona <> t.id_zona
+            THEN 'Zona incorrecta'
+        WHEN e.fecha < t.vigente_desde
+            OR (
+                t.vigente_hasta IS NOT NULL
+                AND e.fecha > t.vigente_hasta
+            )
+            THEN 'Tarifa fuera de vigencia'
+        ELSE 'Correcto'
+    END AS estado_validacion
+FROM envios.envio e
+JOIN envios.ciudad c
+    ON c.ciudad_destino = e.ciudad_destino
+JOIN envios.tarifa_zona t
+    ON t.id_tarifa = e.id_tarifa;
+
+
+CREATE VIEW envios.detalle_envio AS
+SELECT
+    e.num_guia,
+    e.fecha,
+    e.ciudad_destino,
+    c.departamento,
+    c.id_zona,
+    t.tarifa_kg,
+    e.peso_kg,
+    e.valor_facturado,
+    e.peso_kg * t.tarifa_kg AS valor_calculado,
+    e.valor_facturado - (e.peso_kg * t.tarifa_kg)
+        AS diferencia
+FROM envios.envio e
+JOIN envios.ciudad c
+    ON c.ciudad_destino = e.ciudad_destino
+JOIN envios.tarifa_zona t
+    ON t.id_tarifa = e.id_tarifa;
+
+
+SELECT
+    (SELECT COUNT(*) FROM envios.envio_original) AS registros_originales,
+    (SELECT COUNT(*) FROM envios.envio) AS registros_migrados;
+
+COMMIT;
+
+-- RESPUESTA A LA PREGUNTA PROPIA
+--
+-- Si la transportadora aumenta las tarifas en enero, no se
+-- debe modificar la tarifa historica utilizada por los envios
+-- realizados en octubre.
+--
+-- Para evitar que el cambio afecte los valores anteriores,
+-- se deben registrar nuevas tarifas con su respectivo periodo
+-- de vigencia, en lugar de sobrescribir las tarifas anteriores.
+--
+-- Cada envio conserva la referencia a la tarifa que le
+-- correspondia en la fecha en que fue realizado.
+--
+-- Esto permite consultar y calcular los valores historicos
+-- sin que los aumentos posteriores alteren los registros.
+--
+-- La conservacion de la tarifa historica no constituye una
+-- redundancia innecesaria, sino el almacenamiento de
+-- informacion necesaria para mantener la historia de los
+-- valores aplicados a cada envio.
+
