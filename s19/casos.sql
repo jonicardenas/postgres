@@ -236,6 +236,134 @@ ROLLBACK;
 --3. Muchas fórmulas tienen menos medicamentos que columnas disponibles, por
 --lo que los pares adicionales quedarían en NULL y harían más dispersos los datos.
 
+-- Caso 3:
+SET search_path TO cursos_libres;
+
+-- Dependencias funcionales:
+--   doc_participante -> nombre_participante, correo
+--   correo -> doc_participante
+--   cod_curso -> nombre_curso, cod_sede
+--   cod_sede -> direccion_sede
+--   (doc_participante, cod_curso) -> valor_pagado
+-- Claves candidatas: (doc_participante, cod_curso) y (correo, cod_curso).
+--   El id serial es solo una clave sustituta.
+-- Problema principal: falta UNIQUE (doc_participante, cod_curso).
+--   Las filas 3 y 7 son la misma inscripción de Juliana Rey en C20 y se suma dos veces.
+-- Problemas secundarios:
+--   2FN: datos del participante dependen solo de doc_participante y datos del
+--     curso solo de cod_curso.
+--   3FN: cod_curso -> cod_sede -> direccion_sede.
+--   correo sin UNIQUE aunque identifica al participante.
+
+-- Evidencia: 
+-- La queja: C20 suma 580000 y debería sumar 380000
+SELECT cod_curso, nombre_curso, sum(valor_pagado)
+FROM inscripcion GROUP BY cod_curso, nombre_curso;
+
+-- Inscripciones duplicadas:
+SELECT doc_participante, cod_curso, count(*)
+FROM inscripcion GROUP BY doc_participante, cod_curso HAVING count(*) > 1;
+
+-- Redundancia de la dirección:
+SELECT direccion_sede, count(*) FROM inscripcion
+GROUP BY direccion_sede ORDER BY count(*) DESC;
+
+-- Los datos no contradicen las dependencias (todas deben dar 0 filas):
+SELECT doc_participante FROM inscripcion GROUP BY doc_participante
+  HAVING count(DISTINCT nombre_participante) > 1 OR count(DISTINCT correo) > 1;
+SELECT correo FROM inscripcion GROUP BY correo HAVING count(DISTINCT doc_participante) > 1;
+SELECT cod_curso FROM inscripcion GROUP BY cod_curso
+  HAVING count(DISTINCT nombre_curso) > 1 OR count(DISTINCT cod_sede) > 1;
+SELECT cod_sede FROM inscripcion GROUP BY cod_sede HAVING count(DISTINCT direccion_sede) > 1;
+
+-- Se elimina la fila 7 porque es idéntica a la 3 en todos los campos
+-- y las reglas dicen que un participante se inscribe a lo sumo una vez por curso.
+
+-- El esquema corregido: 
+--   participante (doc_participante PK, nombre_participante, correo UNIQUE NOT NULL)
+--   sede         (cod_sede PK, direccion_sede)
+--   curso        (cod_curso PK, nombre_curso, cod_sede FK -> sede)
+--   inscripcion  (doc_participante FK, cod_curso FK, valor_pagado,
+--                 PK (doc_participante, cod_curso))
+-- valor_pagado depende de la clave completa (el descuento es por inscripción).
+
+-- Migración: 
+-- Conteos esperados (calculados antes): 4 participantes, 2 sedes,
+-- 3 cursos, 7 inscripciones (8 menos el duplicado).
+
+BEGIN;
+
+CREATE TABLE sede (
+  cod_sede char(2) PRIMARY KEY,
+  direccion_sede varchar(60) NOT NULL);
+CREATE TABLE curso (
+  cod_curso char(3) PRIMARY KEY,
+  nombre_curso varchar(60) NOT NULL,
+  cod_sede char(2) NOT NULL REFERENCES sede);
+CREATE TABLE participante (
+  doc_participante varchar(15) PRIMARY KEY,
+  nombre_participante varchar(80) NOT NULL,
+  correo varchar(120) NOT NULL UNIQUE);
+CREATE TABLE inscripcion_nueva (
+  doc_participante varchar(15) REFERENCES participante,
+  cod_curso char(3) REFERENCES curso,
+  valor_pagado integer NOT NULL CHECK (valor_pagado >= 0),
+  PRIMARY KEY (doc_participante, cod_curso));
+
+INSERT INTO sede SELECT DISTINCT cod_sede, direccion_sede FROM inscripcion;
+INSERT INTO curso SELECT DISTINCT cod_curso, nombre_curso, cod_sede FROM inscripcion;
+INSERT INTO participante SELECT DISTINCT doc_participante, nombre_participante, correo FROM inscripcion;
+INSERT INTO inscripcion_nueva SELECT DISTINCT doc_participante, cod_curso, valor_pagado FROM inscripcion;
+
+-- Verificación:
+-- Esperado: 4, 2, 3, 7
+SELECT (SELECT count(*) FROM participante) AS participantes,
+       (SELECT count(*) FROM sede) AS sedes,
+       (SELECT count(*) FROM curso) AS cursos,
+       (SELECT count(*) FROM inscripcion_nueva) AS inscripciones;
+
+-- Ambas deben dar 0 filas:
+(SELECT DISTINCT doc_participante, nombre_participante, correo, cod_curso,
+        nombre_curso, cod_sede, direccion_sede, valor_pagado FROM inscripcion)
+EXCEPT
+(SELECT p.doc_participante, p.nombre_participante, p.correo, c.cod_curso,
+        c.nombre_curso, s.cod_sede, s.direccion_sede, i.valor_pagado
+ FROM inscripcion_nueva i
+ JOIN participante p USING (doc_participante)
+ JOIN curso c USING (cod_curso)
+ JOIN sede s USING (cod_sede));
+
+(SELECT p.doc_participante, p.nombre_participante, p.correo, c.cod_curso,
+        c.nombre_curso, s.cod_sede, s.direccion_sede, i.valor_pagado
+ FROM inscripcion_nueva i
+ JOIN participante p USING (doc_participante)
+ JOIN curso c USING (cod_curso)
+ JOIN sede s USING (cod_sede))
+EXCEPT
+(SELECT DISTINCT doc_participante, nombre_participante, correo, cod_curso,
+        nombre_curso, cod_sede, direccion_sede, valor_pagado FROM inscripcion);
+
+DROP TABLE inscripcion;
+ALTER TABLE inscripcion_nueva RENAME TO inscripcion;
+
+-- La queja resuelta: Fotografía digital debe dar 380000
+SELECT c.nombre_curso, sum(i.valor_pagado)
+FROM inscripcion i JOIN curso c USING (cod_curso)
+GROUP BY c.nombre_curso;
+
+COMMIT;
+
+-- PREGUNTA PROPIA
+-- ¿Por qué una PK de una columna no la pone en 2FN?
+--   Las formas normales se evalúan sobre TODAS las claves candidatas.
+--   (doc_participante, cod_curso) identifica una inscripción aunque nadie la
+--   declaró, y nombre_participante o nombre_curso dependen solo de una parte
+--   de ella. Agregar un id no normaliza nada: solo cambia el nombre de la PK.
+-- ¿Qué restricción faltaba?
+--   UNIQUE (doc_participante, cod_curso): habría rechazado la segunda inscripción
+--   de Juliana en Fotografía digital y el descuadre de 200000 no habría ocurrido.
+--   También faltaba UNIQUE (correo).
+
 
 
 -- Caso 4:
