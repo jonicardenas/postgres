@@ -11,3 +11,5 @@ data/*
 # Copias de seguridad locales
 README_respaldo.md
 scripts/*.bak-check
+S19/S19-caso4-envios.sql
+S19/S19-esquemas.sql
