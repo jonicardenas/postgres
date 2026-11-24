@@ -9,12 +9,17 @@ Jonathan David Borrero Viveros  2520360
 ## Qué hay en el repositorio
 
 ```
-docker-compose.yml   PostgreSQL 16 y pgAdmin
-.env.example         variables de entorno (se puede copiar a .env, pero no es obligatorio)
-init/01_esquema.sql  esquema `biblioteca`; Docker lo ejecuta cuando la base se crea vacía
-scripts/             carga-libros.sql y carga-lectores.sql (se corren a mano)
-scripts/datos/       CSV semilla, CSV con errores y nuestros CSV propios
-
+docker-compose.yml          PostgreSQL 16 y pgAdmin
+.env.example                variables de entorno (se puede copiar a .env, pero no es obligatorio)
+init/01_esquema.sql         esquema `biblioteca` normalizado (3FN / FNBC) y vistas de verificación
+scripts/carga-libros.sql    carga y validación de libros y ejemplares
+scripts/carga-lectores.sql  carga y validación de lectores
+scripts/datos-prueba.sql    31 préstamos y 14 devoluciones de prueba (S16 / S20)
+scripts/reportes.sql        los 4 reportes del proyecto sobre `biblioteca` (S16 / S20)
+scripts/normalizacion.sql   migración y verificación del esquema para el Hito 3 (S20)
+scripts/datos/              CSV semilla, CSV con errores y nuestros CSV propios
+S20/documento_s20.md        documento de normalización del Hito 3 (antes y después)
+assets/                     evidencias y salidas de verificación de los reportes
 ```
 
 ## Cómo levantar el contenedor
@@ -266,3 +271,32 @@ Después de la prueba restauramos el script original y verificamos que:
 Con esta prueba comprobamos que las restricciones `CHECK` protegen la tabla incluso si una validación del script falla o se desactiva accidentalmente. Sin embargo, también observamos que un error en una sola fila puede cancelar toda la sentencia de inserción y provocar que no se registre la bitácora de esa ejecución.
 
 Por eso es importante mantener las validaciones del `CASE` en los scripts de carga y las restricciones del esquema como última defensa.
+
+## Hito 3 (S20): normalización, migración y reportes
+
+El análisis completo de formas normales, dependencias funcionales, cambios aplicados y desnormalizaciones justificadas está en `S20/documento_s20.md`.
+
+### 1. Probar `init/01_esquema.sql` en una base limpia aparte
+
+Para verificar que el esquema inicial actualizado corre limpio sin borrar la base `curso`:
+
+```bash
+docker compose exec postgres psql -U curso -d curso -c "CREATE DATABASE prueba_init;"
+docker compose exec postgres psql -U curso -d prueba_init -f /docker-entrypoint-initdb.d/01_esquema.sql
+docker compose exec postgres psql -U curso -d curso -c "DROP DATABASE prueba_init;"
+```
+
+### 2. Cargar datos de prueba, correr la migración y verificar los reportes
+
+Con los libros y lectores ya cargados en `biblioteca`:
+
+```bash
+# 1. Cargar los 31 préstamos y 14 devoluciones de prueba
+docker compose exec postgres psql -U curso -d curso -f /scripts/datos-prueba.sql
+
+# 2. Aplicar/verificar la migración del Hito 3 y las vistas de descuadre (0 filas)
+docker compose exec postgres psql -U curso -d curso -f /scripts/normalizacion.sql
+
+# 3. Correr los 4 reportes de S16 sobre el esquema normalizado
+docker compose exec postgres psql -U curso -d curso -f /scripts/reportes.sql
+```
