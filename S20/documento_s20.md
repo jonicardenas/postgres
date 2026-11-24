@@ -1,174 +1,232 @@
-# Normalización de la base de datos — S20
+# Normalización de la base de datos — S20 (Hito 3)
 
 ## 1. Esquema antes de la normalización
 
-El esquema original de `biblioteca` estaba compuesto por seis tablas principales y una tabla auxiliar:
+El esquema original de `biblioteca` estaba compuesto por seis tablas principales y una tabla auxiliar para los procesos de carga:
 
 - `rol`: almacena los roles del sistema.
-- `usuario`: registra los usuarios y referencia el rol correspondiente.
-- `libro`: almacena la información bibliográfica de cada libro.
+- `usuario`: registra los usuarios y referencia su rol.
+- `libro`: almacena la información de cada libro del catálogo.
 - `ejemplares`: registra las copias físicas asociadas a cada libro.
-- `prestamo`: registra los préstamos realizados por los usuarios sobre los libros.
-- `devolucion`: registra las devoluciones asociadas a los préstamos y a los ejemplares.
-- `rechazo_carga`: tabla auxiliar utilizada por los procesos de carga.
+- `prestamo`: registra los préstamos realizados por los usuarios.
+- `devolucion`: registra las devoluciones asociadas a cada préstamo y ejemplar.
+- `rechazo_carga`: tabla auxiliar usada en los esquemas `carga_libros` y `carga_lectores`.
 
-**Claves primarias originales:**
+**Claves primarias y restricciones `UNIQUE` originales:**
 
-| Tabla | Clave primaria |
-|---|---|
-| `rol` | `PK_id_rol` |
-| `usuario` | `PK_id_usuario` |
-| `libro` | `PK_id_libro` |
-| `ejemplares` | `PK_id_ejemplar` |
-| `prestamo` | `PK_id_prestamo` |
-| `devolucion` | (`FK_id_prestamo`, `FK_id_ejemplar`) |
+| Tabla | Clave primaria original | Restricciones `UNIQUE` originales |
+|---|---|---|
+| `rol` | `PK_id_rol` | `uq_rol_nombre` (`nombre_rol`) |
+| `usuario` | `PK_id_usuario` | `uq_usuario_correo` (`correo`), `uq_usuario_documento` (`documento`) |
+| `libro` | `PK_id_libro` | `uq_libro_isbn` (`isbn`) |
+| `ejemplares` | `PK_id_ejemplar` | *(ninguna)* |
+| `prestamo` | `PK_id_prestamo` | *(ninguna)* |
+| `devolucion` | `("FK_id_prestamo", "FK_id_ejemplar")` | *(ninguna)* |
 
-**Relaciones entre las tablas principales:**
+**Relaciones entre las tablas principales (antes de la migración):**
 
 ```text
 rol         1 ─── N usuario
 usuario     1 ─── N prestamo
 libro       1 ─── N prestamo
 libro       1 ─── N ejemplares
-prestamo    1 ─── N devolucion (según el esquema original)
+prestamo    1 ─── N devolucion  (según la PK compuesta original)
 ejemplares  1 ─── N devolucion
 ```
 
-La tabla `prestamo` referencia directamente a `usuario` y `libro`, pero no identifica directamente el ejemplar físico prestado. La tabla `devolucion` relaciona el préstamo con el ejemplar devuelto.
+Aunque la regla del negocio establece que cada préstamo tiene como máximo una devolución, la clave primaria compuesta original de `devolucion` (`"FK_id_prestamo", "FK_id_ejemplar"`) permitía registrar más de una fila para el mismo préstamo con ejemplares diferentes.
 
-Aunque la regla de negocio establece que cada préstamo debe tener como máximo una devolución, la clave primaria compuesta original de `devolucion` permitía registrar más de una fila para un mismo préstamo, siempre que correspondiera a ejemplares diferentes. Esta diferencia motivó uno de los cambios de normalización.
+---
 
 ## 2. Dependencias funcionales y claves candidatas
 
-Una dependencia funcional \(X \rightarrow Y\) indica que el valor de un atributo o conjunto de atributos \(X\) determina un único valor para \(Y\), de acuerdo con las reglas de negocio del sistema.
-
 | Tabla | Claves candidatas | Dependencias funcionales y regla que las justifica |
 |---|---|---|
-| `rol` | `PK_id_rol`, `nombre_rol` | Cada identificador corresponde a un único nombre de rol. Además, el nombre es único, por lo que también identifica un rol. |
-| `usuario` | `PK_id_usuario`, `correo`, `documento` | Cada identificador, correo o documento identifica un único usuario, debido a las restricciones de unicidad. Cada uno determina los demás atributos de la tabla. |
-| `libro` | `PK_id_libro`, `isbn` | Cada identificador corresponde a un libro y cada ISBN identifica un único libro. Ambos determinan los demás atributos de la tabla. |
-| `ejemplares` | `PK_id_ejemplar` | Cada ejemplar tiene un identificador único que determina el libro al que pertenece y su estado físico. |
-| `prestamo` | Original: `PK_id_prestamo`. Adicional implementada: (`FK_id_usuario`, `FK_id_libro`, `fecha_prestamo`). | El identificador determina los datos del préstamo. La combinación de usuario, libro y fecha también identifica un préstamo, según la regla de negocio y la restricción `UNIQUE` incorporada durante la migración. |
-| `devolucion` | Original: (`FK_id_prestamo`, `FK_id_ejemplar`). Nueva clave primaria implementada: `FK_id_prestamo`. | La regla de negocio establece que cada préstamo tiene como máximo una devolución. Por tanto, el identificador del préstamo determina el ejemplar devuelto, el estado de devolución y la fecha. |
+| `rol` | `(PK_id_rol)`, `(nombre_rol)` | • `PK_id_rol → nombre_rol` *(cada rol tiene un ID único)*<br>• `nombre_rol → PK_id_rol` *(el nombre del rol es único y no se repite)* |
+| `usuario` | `(PK_id_usuario)`, `(documento)`, `(correo)` | • `PK_id_usuario → FK_id_rol, correo, estado, contrasena, nombres, documento, apellidos, telefono` *(cada usuario tiene un ID único)*<br>• `documento → demás atributos` *(cada documento identifica a una sola persona)*<br>• `correo → demás atributos` *(cada correo pertenece a un solo usuario)* |
+| `libro` | `(PK_id_libro)`, `(isbn)` | • `PK_id_libro → titulo, autor, editorial, ejemplares_disponibles, anio_publicacion, categoria, isbn` *(cada libro tiene un ID único)*<br>• `isbn → demás atributos` *(cada ISBN identifica una única edición del catálogo)* |
+| `ejemplares` | `(PK_id_ejemplar)` | • `PK_id_ejemplar → FK_id_libro, estado` *(cada copia física pertenece a un único libro y tiene una condición física)* |
+| `prestamo` | Original: `(PK_id_prestamo)`<br>Adicional incorporada: `(FK_id_usuario, FK_id_libro, fecha_prestamo)` | • `PK_id_prestamo → FK_id_usuario, FK_id_libro, fecha_prestamo, estado_prestamo, fecha_vencimiento` *(cada préstamo tiene un ID único)*<br>• `(FK_id_usuario, FK_id_libro, fecha_prestamo) → PK_id_prestamo, estado_prestamo, fecha_vencimiento` *(un usuario no puede registrar dos préstamos del mismo libro en la misma fecha)* |
+| `devolucion` | Declarada original: `(FK_id_prestamo, FK_id_ejemplar)`<br>Clave candidata real: `(FK_id_prestamo)` | • `FK_id_prestamo → FK_id_ejemplar, estado_devolucion, fecha_devolucion` *(cada préstamo tiene como máximo una devolución, por lo que el préstamo determina el ejemplar devuelto, la fecha y el estado)* |
 
-### Precisiones sobre las claves candidatas
+**Alcance:** `rechazo_carga` (`PK_id_rechazo → archivo, linea, contenido, motivo, fecha_rechazo`) es una tabla auxiliar de los procesos de carga que ya está en FNBC/3FN y no requiere cambios.
 
-- En `prestamo`, la combinación (`FK_id_usuario`, `FK_id_libro`, `fecha_prestamo`) no estaba garantizada por el DDL original. Durante la migración se incorporó una restricción `UNIQUE` para garantizar esta regla de negocio.
-- En `devolucion`, la clave primaria original era compuesta y permitía asociar más de una devolución al mismo préstamo. Durante la migración se reemplazó por `FK_id_prestamo`, garantizando como máximo una devolución por préstamo.
-- En las demás tablas, las claves candidatas mencionadas están respaldadas por las restricciones de clave primaria o unicidad del esquema original.
+---
 
-**Alcance:** `rechazo_carga` se considera una tabla auxiliar de los procesos de carga y no forma parte de las seis tablas principales del esquema `biblioteca`. Por ello, no se incluye en esta clasificación.
-
-## 3. Forma normal y problemas encontrados
-
-El análisis se realiza a partir de las dependencias funcionales, las claves candidatas y las restricciones del esquema original. Las formas normales identificadas antes de la migración fueron:
+## 3. Forma normal de cada tabla y problemas encontrados
 
 | Tabla | Forma normal original | Problema encontrado |
 |---|---|---|
-| `rol` | FNBC | No se encontraron problemas de normalización. |
-| `usuario` | FNBC | No se encontraron dependencias parciales ni transitivas. |
-| `libro` | FNBC | `ejemplares_disponibles` presentó inconsistencias por ser un dato derivado. `editorial` estaba en NULL en todos los registros. |
-| `ejemplares` | FNBC | El estado `prestado` representaba una condición derivada de los préstamos. |
-| `prestamo` | FNBC | Se encontraron estados desactualizados y faltaba una restricción UNIQUE sobre usuario, libro y fecha. |
-| `devolucion` | 1FN | Presentaba una dependencia parcial respecto a su clave primaria compuesta, por lo que incumplía 2FN. |
+| `rol` | **FNBC** (y **3FN**) | Ninguno. La clave natural `nombre_rol` está protegida con `UNIQUE` y `NOT NULL`. |
+| `usuario` | **FNBC** (y **3FN**) | Ninguno. No tiene dependencias parciales ni transitivas y sus claves naturales (`documento`, `correo`) tienen `UNIQUE`. |
+| `libro` | **FNBC** (y **3FN**) | `ejemplares_disponibles` es un dato derivado que presentó descuadres frente a los préstamos abiertos. `editorial` está en `NULL`. |
+| `ejemplares` | **FNBC** (y **3FN**) | El estado `'prestado'` es un valor derivado de los préstamos abiertos, no una condición física del ejemplar. |
+| `prestamo` | **FNBC** (y **3FN**) | `estado_prestamo` presentó registros desactualizados al pasar la fecha de vencimiento. Faltaba `UNIQUE ("FK_id_usuario", "FK_id_libro", "fecha_prestamo")`. |
+| `devolucion` | **1FN** *(incumple **2FN**)* | Dependencia parcial respecto a la PK compuesta `("FK_id_prestamo", "FK_id_ejemplar")`: los atributos no primos `fecha_devolucion` y `estado_devolucion` dependen solo de `FK_id_prestamo`. |
 
-### Análisis de los problemas encontrados
+### Consultas de evidencia y resultados
 
-**Tabla `devolucion`: dependencia parcial**
+**1. Tabla `devolucion` (dependencia parcial / verificación de una devolución por préstamo):**
+```sql
+SELECT "FK_id_prestamo", count(*)
+FROM biblioteca.devolucion
+GROUP BY "FK_id_prestamo"
+HAVING count(*) > 1;
+```
+- **Resultado:** `0 filas` (14 devoluciones para 14 préstamos distintos). Confirma que `FK_id_prestamo` determina toda la fila y debe ser la única clave primaria.
 
-La clave primaria original estaba compuesta por (`FK_id_prestamo`, `FK_id_ejemplar`). Sin embargo, la regla de negocio establece que un préstamo tiene como máximo una devolución. Por tanto, `FK_id_prestamo` determina por sí solo el ejemplar devuelto, la fecha y el estado de devolución.
+**2. Tabla `prestamo` (verificación de préstamos duplicados por usuario, libro y fecha):**
+```sql
+SELECT "FK_id_usuario", "FK_id_libro", "fecha_prestamo", count(*)
+FROM biblioteca.prestamo
+GROUP BY "FK_id_usuario", "FK_id_libro", "fecha_prestamo"
+HAVING count(*) > 1;
+```
+- **Resultado:** `0 filas` entre los 31 préstamos cargados.
 
-Esto constituía una dependencia parcial: los atributos no primos dependían de una parte de la clave compuesta. En consecuencia, la tabla cumplía 1FN, pero no 2FN. La consulta de diagnóstico encontró 14 devoluciones correspondientes a 14 préstamos distintos. Durante la migración se reemplazó la clave primaria compuesta por `FK_id_prestamo`, eliminando esta dependencia parcial.
+**3. Tabla `ejemplares` (estado `'prestado'` frente a préstamos abiertos reales):**
+```sql
+SELECT (SELECT count(*) FROM biblioteca.ejemplares WHERE "estado" = 'prestado') AS marcados_prestados,
+       (SELECT count(*) FROM biblioteca.prestamo p
+         WHERE NOT EXISTS (SELECT 1 FROM biblioteca.devolucion d
+                            WHERE d."FK_id_prestamo" = p."PK_id_prestamo")) AS prestamos_abiertos;
+```
+- **Resultado:** `marcados_prestados = 0`, `prestamos_abiertos = 17`. Ningún ejemplar se marcaba como `'prestado'` al registrar préstamos.
 
-**Tabla `libro`: atributo derivado e inconsistencias**
+**4. Tabla `libro` (descuadre entre `ejemplares_disponibles` guardado y calculado):**
+```sql
+SELECT l."PK_id_libro", l."titulo", l."ejemplares_disponibles" AS guardado,
+       (SELECT count(*) FROM biblioteca.ejemplares e WHERE e."FK_id_libro" = l."PK_id_libro")
+     - (SELECT count(*) FROM biblioteca.prestamo p
+         WHERE p."FK_id_libro" = l."PK_id_libro"
+           AND NOT EXISTS (SELECT 1 FROM biblioteca.devolucion d
+                            WHERE d."FK_id_prestamo" = p."PK_id_prestamo")) AS calculado
+FROM biblioteca.libro l
+WHERE l."ejemplares_disponibles" <>
+      (SELECT count(*) FROM biblioteca.ejemplares e WHERE e."FK_id_libro" = l."PK_id_libro")
+    - (SELECT count(*) FROM biblioteca.prestamo p
+        WHERE p."FK_id_libro" = l."PK_id_libro"
+          AND NOT EXISTS (SELECT 1 FROM biblioteca.devolucion d
+                           WHERE d."FK_id_prestamo" = p."PK_id_prestamo"));
+```
+- **Resultado antes de corregir:** 12 libros desfasados en el diagnóstico de S19 (15 al incluir los préstamos de empate; por ejemplo, el libro 1 *"Cien años de soledad"* tenía `guardado = 4`, pero con 4 copias y 2 préstamos abiertos el valor real era `calculado = 2`).
 
-El atributo `ejemplares_disponibles` puede calcularse a partir de las copias registradas en `ejemplares` y los préstamos que todavía no tienen devolución. En el diagnóstico inicial se encontraron diferencias en 12 libros. Por ejemplo, el libro con identificador 1 tenía 4 ejemplares registrados y 2 préstamos abiertos; por tanto, debía tener 2 ejemplares disponibles, pero la columna almacenaba 4.
+**5. Tabla `prestamo` (descuadre en `estado_prestamo`):**
+```sql
+SELECT p."PK_id_prestamo", p."fecha_vencimiento", p."estado_prestamo" AS guardado,
+       CASE
+         WHEN d."FK_id_prestamo" IS NOT NULL THEN 'devuelto'
+         WHEN p."fecha_vencimiento" < CURRENT_DATE THEN 'vencido'
+         ELSE 'activo'
+       END AS calculado
+FROM biblioteca.prestamo p
+LEFT JOIN biblioteca.devolucion d ON d."FK_id_prestamo" = p."PK_id_prestamo"
+WHERE p."estado_prestamo" <> CASE
+         WHEN d."FK_id_prestamo" IS NOT NULL THEN 'devuelto'
+         WHEN p."fecha_vencimiento" < CURRENT_DATE THEN 'vencido'
+         ELSE 'activo'
+       END;
+```
+- **Resultado antes de corregir:** detectó los préstamos abiertos cuya `fecha_vencimiento` ya había pasado pero seguían con `estado_prestamo = 'activo'` (préstamos `1007` y `1021` en S19, más `1012` al correr la migración en la fecha actual).
 
-En la comprobación realizada durante la migración no se encontraron diferencias entre el valor almacenado y el calculado, por lo que no fue necesario actualizar esta columna. Se creó una vista para detectar posibles descuadres posteriores.
+---
 
-Adicionalmente, `editorial` estaba en NULL en todos los registros del diagnóstico. Aunque se encontraron autores y categorías repetidos, esta repetición no representa por sí sola una violación de las formas normales.
+## 4. Cambios aplicados y migración de datos (`scripts/normalizacion.sql`)
 
-**Tabla `ejemplares`: estado derivado**
+La migración se escribió en `scripts/normalizacion.sql` dentro de una transacción (`BEGIN` … `COMMIT`) y los mismos ajustes se dejaron en `init/01_esquema.sql` y `scripts/datos-prueba.sql`:
 
-En el diagnóstico de S19 se reportaron 17 préstamos abiertos y ningún ejemplar marcado como `prestado`; los ejemplares figuraban como `disponible`. Esto evidenciaba que el estado de la copia no permitía representar de forma confiable su situación frente a los préstamos.
+1. **`devolucion`:** se cambió la clave primaria compuesta por `PRIMARY KEY ("FK_id_prestamo")`, eliminando la dependencia parcial y llevando la tabla a **3FN / FNBC**.
+2. **`ejemplares`:** se limpió cualquier estado `'prestado'` a `'disponible'` y se actualizó `ck_ejemplares_estado` a `CHECK ("estado" IN ('disponible', 'danado', 'mantenimiento'))`.
+3. **`prestamo`:** se agregó `CONSTRAINT uq_prestamo_usuario_libro_fecha UNIQUE ("FK_id_usuario", "FK_id_libro", "fecha_prestamo")`.
+4. **Datos derivados y vistas de verificación:** se actualizaron con `UPDATE` las filas desfasadas de `libro.ejemplares_disponibles` y `prestamo.estado_prestamo`, y se crearon las vistas `v_descuadre_disponibles` y `v_descuadre_estado_prestamo`.
 
-Durante la migración se modificó la restricción `CHECK` de `estado` para admitir únicamente `disponible`, `danado` y `mantenimiento`. También se registró la actualización de 17 ejemplares desde `prestado` a `disponible`. Al finalizar, se verificó que los 131 ejemplares estaban en estado `disponible`.
+Como todas las tablas excepto `devolucion` ya estaban en 3FN/FNBC y la corrección de `devolucion` consistió en ajustar su clave primaria sin partir la tabla en dos, no hubo descomposición que reconstruir con joins y `EXCEPT`. La verificación se hizo comprobando los conteos antes y después y revisando que ambas vistas de descuadre devuelvan 0 filas:
 
-Se decidió reservar el atributo `estado` para la condición física de la copia y determinar si está prestada mediante las relaciones entre préstamos y devoluciones.
+| Tabla | Conteo antes (semilla / con propios) | Conteo después (semilla / con propios) |
+|---|---:|---:|
+| `rol` | 1 | 1 |
+| `usuario` | 20 / 25 | 20 / 25 |
+| `libro` | 32 / 37 | 32 / 37 |
+| `ejemplares` | 94 / 114 | 94 / 114 |
+| `prestamo` | 31 | 31 |
+| `devolucion` | 14 | 14 |
 
-**Tabla `prestamo`: estado desactualizado**
+Además, se probó `init/01_esquema.sql` en una base vacía (`prueba_init`) y se corrieron `scripts/datos-prueba.sql` y `scripts/reportes.sql` sobre el esquema actualizado, obteniendo los mismos resultados de S16 (`21` filas en el reporte 1, `2` filas en el reporte 2, `3` filas en el reporte 3 y `5` filas en el reporte 4).
 
-En el diagnóstico de S19 se encontraron dos préstamos, identificados como 1007 y 1021, cuyo estado almacenado era `activo`, aunque su fecha de vencimiento había pasado y no tenían devolución registrada.
-
-Durante la migración se volvió a verificar el estado utilizando la fecha local de Colombia (`America/Bogota`). Se actualizaron tres préstamos que debían figurar como `vencido`. También se incorporó una restricción `UNIQUE` sobre (`FK_id_usuario`, `FK_id_libro`, `fecha_prestamo`) para impedir registros duplicados según la regla de negocio. No se encontraron combinaciones duplicadas entre los 31 préstamos existentes.
-
-**Conclusión del análisis**
-
-Antes de la migración, las tablas `rol`, `usuario`, `libro`, `ejemplares` y `prestamo` cumplían FNBC según las dependencias funcionales identificadas. La tabla `devolucion` cumplía 1FN, pero no 2FN debido a una dependencia parcial respecto a su clave primaria compuesta.
-
-Después de los cambios, la tabla `devolucion` dejó de presentar esa dependencia parcial. Las inconsistencias identificadas en los atributos derivados y estados almacenados se abordaron mediante los cambios estructurales, las actualizaciones y las vistas de verificación descritas en las secciones siguientes.
-
-## 4. Cambios aplicados y migración de datos
-
-Los cambios se aplicaron mediante una migración incremental sobre el esquema `biblioteca`, conservando los registros existentes. Antes de realizarla se generó un respaldo de la base de datos.
-
-Los cambios estructurales fueron:
-
-- **devolucion:** se reemplazó la clave primaria compuesta por una clave primaria basada únicamente en `FK_id_prestamo`. Los 14 registros existentes tenían valores únicos y no nulos en esta columna.
-- **prestamo:** se agregó una restricción `UNIQUE` sobre (`FK_id_usuario`, `FK_id_libro`, `fecha_prestamo`). No se encontraron combinaciones duplicadas entre los 31 préstamos existentes.
-- **ejemplares:** se modificó la restricción `CHECK` de `estado` para admitir únicamente `disponible`, `danado` y `mantenimiento`. Los 17 ejemplares que figuraban como `prestado` se actualizaron a `disponible`, porque el préstamo se determina mediante los registros abiertos en `prestamo`.
-
-También se actualizaron los estados de tres préstamos que continuaban registrados como `activo`, aunque su fecha de vencimiento ya había pasado. La comparación se realizó utilizando la fecha local de Colombia (`America/Bogota`).
-
-Se crearon dos vistas de verificación:
-
-- `biblioteca.v_descuadre_disponibles`: compara la disponibilidad guardada en `libro` con la calculada a partir de los ejemplares y los préstamos abiertos.
-- `biblioteca.v_descuadre_estado_prestamo`: compara el estado almacenado del préstamo con el estado calculado a partir de su fecha de vencimiento y la existencia de una devolución.
-
-**Conteos después de la migración:**
-
-| Tabla | Registros |
-|---|---:|
-| rol | 1 |
-| usuario | 25 |
-| libro | 37 |
-| ejemplares | 131 |
-| prestamo | 31 |
-| devolucion | 14 |
-
-La migración no insertó ni eliminó registros de estas tablas. Por tanto, sus cantidades se conservaron durante los cambios estructurales y las actualizaciones de estado. No se modificaron los registros de `rechazo_carga`.
-
-Las vistas de verificación no devolvieron registros al finalizar la migración: no se encontraron descuadres de disponibilidad ni de estado de préstamo en esa comprobación.
+---
 
 ## 5. Desnormalizaciones deliberadas
 
-Se conservaron algunos atributos derivados por compatibilidad con los scripts existentes:
+### 5.1. `libro.ejemplares_disponibles`
+- **Qué y por qué:** Se conserva la columna `ejemplares_disponibles` en `libro` para evitar recorrer `ejemplares` y `prestamo` en cada búsqueda del catálogo y mantener compatibilidad con `scripts/carga-libros.sql`. En las pruebas de la Parte A sobre el esquema `rendimiento` (5 000 libros, 15 000 ejemplares y 303 750 préstamos) se obtuvieron estos tiempos con `EXPLAIN ANALYZE`:
 
-**`libro.ejemplares_disponibles`:** se conserva porque `scripts/carga-libros.sql` utiliza esta columna al cargar los libros. Su valor se puede calcular a partir del número de ejemplares físicos y los préstamos que todavía no tienen devolución. La vista `biblioteca.v_descuadre_disponibles` permite detectar diferencias entre el valor almacenado y el calculado. La comprobación posterior a la migración devolvió cero registros.
+  | Consulta | Sin índices | Con índices (A2) | Desnormalizada (A3 o A4) |
+  |---|---|---|---|
+  | Catálogo (`Libro 12%`) | 23.88 ms *(26.13 / 22.28 / 23.88 ms)* | 2.37 ms *(2.42 / 2.37 / 1.95 ms)* | **0.38 ms** *(0.38 / 0.38 / 0.35 ms)* |
+  | Top 20 más prestados | 196.37 ms *(196.37 / 210.20 / 188.48 ms)* | *(no aplica)* | **0.007 ms** *(0.014 / 0.007 / 0.005 ms)* |
 
-**`prestamo.estado_prestamo`:** se conserva por compatibilidad con `scripts/datos-prueba.sql`. El estado se puede calcular considerando si el préstamo tiene devolución y, en caso contrario, comparando su fecha de vencimiento con la fecha actual. La vista `biblioteca.v_descuadre_estado_prestamo` permite detectar diferencias. Se corrigieron tres estados durante la migración y la vista no encontró diferencias al finalizar la comprobación.
+- **Cómo se mantiene consistente:** Se actualiza en la misma transacción en `scripts/datos-prueba.sql` y `scripts/normalizacion.sql`. Su actualización automática mediante un **trigger** en cada préstamo y devolución queda anotada como pendiente para el **Hito 4 (M6)**.
+- **Consulta de verificación (`v_descuadre_disponibles`):**
+  ```sql
+  CREATE VIEW v_descuadre_disponibles AS
+  SELECT * FROM (
+    SELECT l."PK_id_libro",
+           l."ejemplares_disponibles" AS guardado,
+           (SELECT count(*) FROM ejemplares e
+             WHERE e."FK_id_libro" = l."PK_id_libro")
+         - (SELECT count(*) FROM prestamo p
+             WHERE p."FK_id_libro" = l."PK_id_libro"
+               AND NOT EXISTS (SELECT 1 FROM devolucion d
+                                WHERE d."FK_id_prestamo" = p."PK_id_prestamo")) AS calculado
+    FROM libro l
+  ) t
+  WHERE guardado <> calculado;
+  ```
 
-El cálculo de vencimiento utiliza la fecha local de Colombia para evitar que la zona horaria del servidor adelante la clasificación de los préstamos.
+### 5.2. `prestamo.estado_prestamo`
+- **Qué y por qué:** Se conserva por compatibilidad con `scripts/datos-prueba.sql`.
+- **Cómo se mantiene y verificación (`v_descuadre_estado_prestamo`):** Se actualiza al registrar préstamos/devoluciones (pendiente por trigger en el Hito 4). Como un trigger no se ejecuta solo cuando pasa la fecha de vencimiento, los reportes de mora de `scripts/reportes.sql` consultan directamente `fecha_vencimiento < CURRENT_DATE` y el estado guardado se verifica con la vista:
+  ```sql
+  CREATE VIEW v_descuadre_estado_prestamo AS
+  SELECT p."PK_id_prestamo",
+         p."estado_prestamo" AS guardado,
+         CASE
+           WHEN d."FK_id_prestamo" IS NOT NULL THEN 'devuelto'
+           WHEN p."fecha_vencimiento" < CURRENT_DATE THEN 'vencido'
+           ELSE 'activo'
+         END AS calculado
+  FROM prestamo p
+  LEFT JOIN devolucion d ON d."FK_id_prestamo" = p."PK_id_prestamo"
+  WHERE p."estado_prestamo" <> CASE
+           WHEN d."FK_id_prestamo" IS NOT NULL THEN 'devuelto'
+           WHEN p."fecha_vencimiento" < CURRENT_DATE THEN 'vencido'
+           ELSE 'activo'
+         END;
+  ```
 
-**`devolucion.estado_devolucion`:** se conserva por compatibilidad con los datos y procesos existentes. Los estados `a_tiempo` y `tardia` representan clasificaciones relacionadas con las fechas del préstamo y la devolución, mientras que `danado` registra una condición física del ejemplar. No se creó una vista de verificación específica para esta columna durante la migración.
+### 5.3. Datos históricos que se conservan por estar en 3FN
+- **`prestamo.fecha_vencimiento`:** Aunque el plazo por defecto sea de 14 días, la biblioteca puede cambiar el plazo o dar plazos distintos (en `datos-prueba.sql` hay préstamos con 10, 14 y 29 días). Por tanto, es un dato histórico que depende de `PK_id_prestamo` y está en **3FN**.
+- **`devolucion.estado_devolucion`:** Se conserva por compatibilidad con `scripts/datos-prueba.sql`; el valor `'danado'` registra la condición física en la entrega, mientras que `'a_tiempo'` y `'tardia'` coinciden con comparar `fecha_devolucion > fecha_vencimiento`.
 
-Estas columnas se mantienen como desnormalizaciones deliberadas. Las vistas permiten detectar inconsistencias, pero no actualizan automáticamente los valores. La automatización de su mantenimiento no forma parte de los cambios aplicados en esta migración.
+---
 
 ## 6. Esquema después de la normalización
 
-Después de los cambios, el esquema `biblioteca` queda conformado por las siguientes tablas:
+Después de los cambios, **todas las seis tablas del esquema `biblioteca` quedan en 3FN y también en FNBC** (ninguna tabla queda solo en 3FN sin cumplir FNBC, porque en todas las dependencias funcionales cada determinante es superclave de su tabla):
 
-- **rol:** identificada por `PK_id_rol`; `nombre_rol` es único.
-- **usuario:** identificada por `PK_id_usuario`; `correo` y `documento` son únicos.
-- **libro:** identificada por `PK_id_libro`; `isbn` es único. Se conserva `ejemplares_disponibles` como atributo derivado.
-- **ejemplares:** identificada por `PK_id_ejemplar`; cada ejemplar pertenece a un libro. Su estado representa únicamente su condición física.
-- **prestamo:** identificado por `PK_id_prestamo`; incluye la restricción única sobre usuario, libro y fecha de préstamo. Se conserva `estado_prestamo`.
-- **devolucion:** identificada por `FK_id_prestamo`, que es su clave primaria y referencia el préstamo correspondiente.
+- **`rol`** (`"PK_id_rol"` PK, `"nombre_rol"` UNIQUE NOT NULL) — **FNBC**
+- **`usuario`** (`"PK_id_usuario"` PK, `"FK_id_rol"` FK → `rol`, `"correo"` UNIQUE NOT NULL, `"documento"` UNIQUE NOT NULL, `"estado"` CHECK IN (`'activo'`, `'inactivo'`, `'suspendido'`), `"contrasena"` NOT NULL, `"nombres"` NOT NULL, `"apellidos"` NOT NULL, `"telefono"`) — **FNBC**
+- **`libro`** (`"PK_id_libro"` PK, `"isbn"` UNIQUE NOT NULL, `"titulo"` NOT NULL, `"autor"` NOT NULL, `"editorial"`, `"ejemplares_disponibles"` NOT NULL CHECK `>= 0` *[desnormalizado]*, `"anio_publicacion"` CHECK `BETWEEN 1400 AND 2100`, `"categoria"`) — **FNBC**
+- **`ejemplares`** (`"PK_id_ejemplar"` PK, `"FK_id_libro"` FK → `libro`, `"estado"` NOT NULL CHECK IN (`'disponible'`, `'danado'`, `'mantenimiento'`)) — **FNBC**
+- **`prestamo`** (`"PK_id_prestamo"` PK, `"FK_id_usuario"` FK → `usuario`, `"FK_id_libro"` FK → `libro`, `"fecha_prestamo"` NOT NULL, `"fecha_vencimiento"` NOT NULL CHECK `>= "fecha_prestamo"`, `"estado_prestamo"` NOT NULL CHECK IN (`'activo'`, `'devuelto'`, `'vencido'`) *[desnormalizado]*, UNIQUE `("FK_id_usuario", "FK_id_libro", "fecha_prestamo")`) — **FNBC**
+- **`devolucion`** (`"FK_id_prestamo"` PK y FK → `prestamo`, `"FK_id_ejemplar"` FK → `ejemplares`, `"estado_devolucion"` NOT NULL CHECK IN (`'a_tiempo'`, `'tardia'`, `'danado'`), `"fecha_devolucion"` NOT NULL) — **FNBC**
+- **Vistas de verificación:** `v_descuadre_disponibles` y `v_descuadre_estado_prestamo`.
 
-La tabla auxiliar `rechazo_carga` se mantiene para registrar los rechazos de los procesos de carga.
-
-Los cambios estructurales realizados permiten eliminar la dependencia parcial identificada en `devolucion` y reforzar la identificación de los préstamos mediante una clave candidata adicional. Se conservó la clave primaria original de `prestamo` y se incorporó una restricción `UNIQUE` sobre usuario, libro y fecha. En `devolucion`, la clave primaria compuesta original se reemplazó por `FK_id_prestamo`, de acuerdo con la regla de una devolución por préstamo.
-
-Las columnas derivadas que se conservaron se documentan como excepciones deliberadas a la eliminación de redundancias, con vistas para verificar su consistencia.
-
-La columna `libro.editorial` se mantiene en el esquema actual; no hizo parte de los cambios aplicados.
+```text
+rol         1 ─── N usuario
+usuario     1 ─── N prestamo
+libro       1 ─── N prestamo
+libro       1 ─── N ejemplares
+prestamo    1 ─── 0..1 devolucion
+ejemplares  1 ─── N devolucion
+```
