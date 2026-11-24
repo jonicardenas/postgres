@@ -166,7 +166,16 @@ SELECT setval(
     (SELECT MAX("PK_id_prestamo") FROM biblioteca.prestamo),
     true
 );
+-- Recalcula ejemplares_disponibles con los préstamos recién cargados
 
+UPDATE biblioteca.libro l
+SET "ejemplares_disponibles" =
+      (SELECT count(*) FROM biblioteca.ejemplares e
+        WHERE e."FK_id_libro" = l."PK_id_libro")
+    - (SELECT count(*) FROM biblioteca.prestamo p
+        WHERE p."FK_id_libro" = l."PK_id_libro"
+          AND NOT EXISTS (SELECT 1 FROM biblioteca.devolucion d
+                           WHERE d."FK_id_prestamo" = p."PK_id_prestamo"));
 -- ------------------------------------------------------------
 -- 5. Confirmar la carga.
 -- ------------------------------------------------------------
@@ -186,3 +195,7 @@ SELECT
         WHERE estado_devolucion = 'tardia'
     ) AS devoluciones_tardias
 FROM biblioteca.devolucion;
+
+
+SELECT * FROM biblioteca.v_descuadre_disponibles;
+SELECT * FROM biblioteca.v_descuadre_estado_prestamo;
