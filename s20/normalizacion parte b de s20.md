@@ -1,10 +1,6 @@
-# Documento de normalizacion - Hito 3
+# Normalizacion del hito 3
 
-**Proyecto:** Biblioteca
-**Esquema analizado:** `biblioteca`
-**Fuente:** `init/01_esquema.sql`, análisis de S19 y taller S20
-
-## 1. Esquema antes
+# 1. Esquema de antes
 
 El esquema contiene las siguientes entidades principales:
 
